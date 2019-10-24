@@ -13,6 +13,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
+	"github.com/sbreitf1/fs"
 )
 
 // S3Target contains address and credentials of a S3 endpoint.
@@ -137,6 +138,17 @@ func newEnv(key string, filePath string) (S3Target, error) {
 	data, err := json.Marshal(&target)
 	if err != nil {
 		return S3Target{}, err
+	}
+
+	isDir, err := fs.IsDir(path.Base(filePath))
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	if !isDir {
+		if err := fs.CreateDirectory(path.Base(filePath)); err != nil {
+			return S3Target{}, err
+		}
 	}
 
 	if err := ioutil.WriteFile(filePath, data, os.ModePerm); err != nil {

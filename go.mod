@@ -10,6 +10,7 @@ require (
 	github.com/go-ini/ini v1.49.0 // indirect
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/sbreitf1/fs v0.2.2
 	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550 // indirect
 	golang.org/x/net v0.0.0-20191021144547-ec77196f6094 // indirect
 )
