@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+cmd/s3client/s3client
 
 # Test binary, build with `go test -c`
 *.test
