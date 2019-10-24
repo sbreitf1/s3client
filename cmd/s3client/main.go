@@ -11,9 +11,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/minio/minio-go"
-
 	"github.com/alecthomas/kingpin"
+	"github.com/dustin/go-humanize"
+	"github.com/minio/minio-go"
 )
 
 // S3Target contains address and credentials of a S3 endpoint.
@@ -78,10 +78,12 @@ func prepareEnv(key string) (S3Target, error) {
 		return S3Target{}, err
 	}
 
-	p := path.Join(usr.HomeDir, ".s3client/"+key+".json")
-	f, err := os.Open(p)
+	filePath := path.Join(usr.HomeDir, ".s3client/"+key+".json")
+	f, err := os.Open(filePath)
 	if err != nil {
-		//TODO allow user to enter environment if not exists
+		if os.IsNotExist(err) {
+			return newEnv(key, filePath)
+		}
 		return S3Target{}, err
 	}
 
@@ -95,6 +97,64 @@ func prepareEnv(key string) (S3Target, error) {
 		return S3Target{}, fmt.Errorf("malformed environment file: %s", err.Error())
 	}
 	return target, nil
+}
+
+func newEnv(key string, filePath string) (S3Target, error) {
+	println("The environment %q does not exist and will be created:", key)
+	target, err := enterTarget(key)
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	data, err := json.Marshal(&target)
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	if err := ioutil.WriteFile(filePath, data, os.ModePerm); err != nil {
+		return S3Target{}, err
+	}
+
+	return target, nil
+}
+
+func enterTarget(key string) (S3Target, error) {
+	fmt.Print("URL> ")
+	url, err := readlnNonEmpty()
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	var secure bool
+	if strings.HasPrefix(url, "http://") {
+		url = url[7:]
+		secure = false
+	} else if strings.HasPrefix(url, "https://") {
+		url = url[8:]
+		secure = true
+	} else {
+		fmt.Print("Secure (yes/no)?> ")
+		str, err := readlnNonEmpty()
+		if err != nil {
+			return S3Target{}, err
+		}
+
+		secure = (str[0] == 'y' || str[0] == 'Y')
+	}
+
+	fmt.Print("Access Key> ")
+	accessKey, err := readlnNonEmpty()
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	fmt.Print("Secret Key> ")
+	secretKey, err := readlnNonEmpty()
+	if err != nil {
+		return S3Target{}, err
+	}
+
+	return S3Target{Key: key, Endpoint: url, Secure: secure, AccessKey: accessKey, SecretKey: secretKey}, nil
 }
 
 func connect(target S3Target) error {
@@ -141,9 +201,13 @@ func init() {
 	commands["enter"] = enter
 	commands["leave"] = leave
 	commands["cd"] = cd
-	commands["ls"] = printLs
-	commands["list"] = printList
+	commands["ls"] = ls
+	commands["rm"] = rm
+	commands["dl"] = dl
+	commands["up"] = up
+	commands["list"] = list
 	commands["mkbucket"] = mkbucket
+	commands["rmbucket"] = rmbucket
 }
 
 var (
@@ -171,16 +235,21 @@ func printHelp(args []string) error {
 	println("  leave            -  leave current bucket")
 	println("  cd               -  enter named directory or \"..\" for parent dir")
 	println("  ls               -  list objects in current bucket and path")
+	println("  rm               -  remove object. Use \"-r\" flag to remove all prefixed objects")
+	println("  dl {src} {dst}   -  download a remote file {src} and write to local file {dst}")
+	println("  up {src} {dst}   -  upload local file {src} to remote file {dst}")
 	println("  list {type}      -  list items of any type in [bucket, object, env]")
 	println("  mkbucket {name}  -  create new bucket with given name")
 	println("  rmbucket {name}  -  delete bucket with given name")
-	println("  pwd              -  print current location")
 	return nil
 }
 
 func enter(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no bucket name specified")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
 	}
 
 	exists, err := minioClient.BucketExists(args[0])
@@ -198,14 +267,26 @@ func enter(args []string) error {
 }
 
 func leave(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("too many arguments")
+	}
+
 	currentBucket = ""
 	currentPrefix = ""
 	return nil
 }
 
 func cd(args []string) error {
-	if len(currentBucket) == 0 {
+	if len(args) == 0 {
 		return fmt.Errorf("no directory specified")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
+	}
+
+	if len(currentBucket) == 0 {
+		println("No bucket entered yet. Entering bucket %q instead", args[0])
+		return enter([]string{args[0]})
 	}
 
 	//TODO check existence?
@@ -225,10 +306,13 @@ func cd(args []string) error {
 	return nil
 }
 
-func printLs(args []string) error {
+func ls(args []string) error {
 	if len(currentBucket) == 0 {
 		println("No bucket entered yet. Listing buckets instead")
-		return printList([]string{"bucket"})
+		return list([]string{"bucket"})
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
 	}
 
 	prefix := currentPrefix
@@ -243,6 +327,8 @@ func printLs(args []string) error {
 	doneCh := make(chan struct{})
 	defer close(doneCh)
 
+	hasFiles := false
+
 	list := make([]minio.ObjectInfo, 0)
 	objectCh := minioClient.ListObjectsV2(currentBucket, prefix, false, doneCh)
 	for obj := range objectCh {
@@ -251,6 +337,9 @@ func printLs(args []string) error {
 		}
 
 		list = append(list, obj)
+		if !strings.HasSuffix(obj.Key, "/") {
+			hasFiles = true
+		}
 	}
 
 	if len(list) == 0 {
@@ -261,11 +350,26 @@ func printLs(args []string) error {
 		} else {
 			println("Found %d objects:", len(list))
 		}
+
+		dirPadding := ""
+		if hasFiles {
+			// humanized file size: "1000.00 GiB" -> 11
+			// padding to file name -> 2
+			// => 13
+			dirPadding = strings.Repeat(" ", 13)
+		}
+
 		for _, obj := range list {
 			if strings.HasSuffix(obj.Key, "/") {
-				println("  D  %s", obj.Key[len(prefix):len(obj.Key)-1])
+				println("  D  %s%s", dirPadding, obj.Key[len(prefix):len(obj.Key)-1])
 			} else {
-				println("  F  %s", obj.Key[len(prefix):])
+				sizeStr := humanize.IBytes(uint64(obj.Size))
+				if strings.HasSuffix(sizeStr, " B") {
+					// align actual numbers of 1-letter unit 'Byte' with 3-letter units like 'MiB'
+					sizeStr = sizeStr + "  "
+				}
+				padding := strings.Repeat(" ", 11-len(sizeStr))
+				println("  F  %s%s  %s", padding, sizeStr, obj.Key[len(prefix):])
 			}
 		}
 	}
@@ -273,9 +377,24 @@ func printLs(args []string) error {
 	return nil
 }
 
-func printList(args []string) error {
+func rm(args []string) error {
+	return fmt.Errorf("The command \"rm\" is not yet implemented")
+}
+
+func dl(args []string) error {
+	return fmt.Errorf("The command \"dl\" is not yet implemented")
+}
+
+func up(args []string) error {
+	return fmt.Errorf("The command \"up\" is not yet implemented")
+}
+
+func list(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no item type specified. Type \"list bucket\" to show a list of all buckets")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
 	}
 
 	switch args[0] {
@@ -301,7 +420,7 @@ func printList(args []string) error {
 		}
 
 	default:
-		return fmt.Errorf("unkown list type %q. Possible parameters are \"bucket\" and \"object\"", args[0])
+		return fmt.Errorf("unkown list type %q. Possible parameters are \"bucket\", \"object\" and \"env\"", args[0])
 	}
 	return nil
 }
@@ -310,8 +429,11 @@ func mkbucket(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no bucket name given")
 	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
+	}
 
-	bucketName := strings.Join(args, " ")
+	bucketName := args[0]
 	err := minioClient.MakeBucket(bucketName, "")
 	if err != nil {
 		return err
@@ -321,14 +443,62 @@ func mkbucket(args []string) error {
 	return nil
 }
 
+func rmbucket(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no bucket name given")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
+	}
+
+	bucketName := args[0]
+	exists, err := minioClient.BucketExists(bucketName)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return fmt.Errorf("bucket %q does not exist", bucketName)
+	}
+
+	println(colorWarning + "########################################")
+	println("###  WARNING: POSSIBLE LOSS OF DATA  ###")
+	println("########################################" + colorEnd)
+	println("You are about to delete bucket %q.", bucketName)
+	println("All data will be lost and cannot be restored.")
+	println("Please confirm deletion by entering the bucket name below:")
+	fmt.Print("> ")
+	str, err := readln()
+	if err != nil {
+		return err
+	}
+
+	if str != bucketName {
+		println("Input mismatch. Bucket was NOT deleted")
+		return nil
+	}
+
+	if err := minioClient.RemoveBucket(bucketName); err != nil {
+		return err
+	}
+
+	println("Bucket %q has been deleted", bucketName)
+	if currentBucket == bucketName {
+		currentBucket = ""
+		currentPrefix = ""
+	}
+	return nil
+}
+
 /* ################################################ */
 /* ###            console io helper             ### */
 /* ################################################ */
 
 var (
-	colorTarget = "\033[1;32m"
-	colorPrefix = "\033[1;34m"
-	colorEnd    = "\033[0m"
+	colorWarning = "\033[1;31m"
+	colorTarget  = "\033[1;32m"
+	colorPrefix  = "\033[1;34m"
+	colorEnd     = "\033[0m"
 )
 
 func init() {
@@ -368,6 +538,17 @@ func readln() (string, error) {
 		return "", err
 	}
 	return text[:len(text)-1], nil
+}
+
+func readlnNonEmpty() (string, error) {
+	line, err := readln()
+	if err != nil {
+		return "", err
+	}
+	if len(line) == 0 {
+		return "", errUserAbort{}
+	}
+	return line, nil
 }
 
 func println(format string, args ...interface{}) {
