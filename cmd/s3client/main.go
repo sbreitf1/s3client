@@ -11,7 +11,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/alecthomas/kingpin"
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
 )
@@ -29,9 +28,6 @@ type S3Target struct {
 }
 
 var (
-	appMain = kingpin.New("s3client", "Browse and manage any S3 endpoint")
-	envFile = appMain.Flag("env", "Name of environment to use or create").Required().Short('e').String()
-
 	// application and connection state
 	targetKey     string
 	minioClient   *minio.Client
@@ -40,15 +36,38 @@ var (
 )
 
 func main() {
-	kingpin.MustParse(appMain.Parse(os.Args[1:]))
+	// command to execute
+	args := make([]string, 0)
+
+	// temporary parser state
+	envFile := ""
+	envFileMode := false
+
+	for i := 1; i < len(os.Args); i++ {
+		if envFileMode {
+			// read environment file and return to normal command line parser state
+			envFile = os.Args[i]
+			envFileMode = false
+
+		} else {
+			// only read environment file once -> further "-e" args might be part of actual command
+			if len(envFile) == 0 && os.Args[i] == "-e" {
+				// next parameter contains the environment file
+				envFileMode = true
+			} else {
+				// append to command
+				args = append(args, os.Args[i])
+			}
+		}
+	}
 
 	var target S3Target
-	if len(*envFile) == 0 {
+	if len(envFile) == 0 {
 		//TODO create temporary target?
 		log.Fatalln("No environment specified.")
 
 	} else {
-		t, err := prepareEnv(*envFile)
+		t, err := prepareEnv(envFile)
 		if err != nil {
 			log.Fatalln(err.Error())
 		}
@@ -67,8 +86,17 @@ func main() {
 		}
 	}
 
-	if err := browse(); err != nil {
-		log.Fatalln(err.Error())
+	if len(args) > 0 {
+		// command specified as input? execute and then exit
+		if err := execLine(args); err != nil {
+			log.Fatalln(err.Error())
+		}
+
+	} else {
+		// interactive mode
+		if err := browse(); err != nil {
+			log.Fatalln(err.Error())
+		}
 	}
 }
 
@@ -126,10 +154,10 @@ func enterTarget(key string) (S3Target, error) {
 	}
 
 	var secure bool
-	if strings.HasPrefix(url, "http://") {
+	if strings.HasPrefix(strings.ToLower(url), "http://") {
 		url = url[7:]
 		secure = false
-	} else if strings.HasPrefix(url, "https://") {
+	} else if strings.HasPrefix(strings.ToLower(url), "https://") {
 		url = url[8:]
 		secure = true
 	} else {
@@ -171,12 +199,11 @@ func connect(target S3Target) error {
 
 func browse() error {
 	for {
-		line, err := readCmd()
+		cmd, err := readCmd()
 		if err != nil {
 			return err
 		}
 
-		cmd := strings.Split(line, " ")
 		switch cmd[0] {
 		case "q":
 			fallthrough
@@ -205,6 +232,8 @@ func init() {
 	commands["rm"] = rm
 	commands["dl"] = dl
 	commands["up"] = up
+	//TODO cat
+	//TODO find
 	commands["list"] = list
 	commands["mkbucket"] = mkbucket
 	commands["rmbucket"] = rmbucket
@@ -213,6 +242,16 @@ func init() {
 var (
 	commands = make(map[string]func(args []string) error)
 )
+
+func execLine(cmd []string) error {
+	if len(cmd) == 0 {
+		return fmt.Errorf("No command specified")
+	} else if len(cmd) == 1 {
+		return execCommand(cmd[0], []string{})
+	} else {
+		return execCommand(cmd[0], cmd[1:])
+	}
+}
 
 func execCommand(cmd string, args []string) error {
 	f, ok := commands[cmd]
@@ -235,7 +274,7 @@ func printHelp(args []string) error {
 	println("  leave            -  leave current bucket")
 	println("  cd               -  enter named directory or \"..\" for parent dir")
 	println("  ls               -  list objects in current bucket and path")
-	println("  rm               -  remove object. Use \"-r\" flag to remove all prefixed objects")
+	println("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects")
 	println("  dl {src} {dst}   -  download a remote file {src} and write to local file {dst}")
 	println("  up {src} {dst}   -  upload local file {src} to remote file {dst}")
 	println("  list {type}      -  list items of any type in [bucket, object, env]")
@@ -511,7 +550,7 @@ var (
 	reader *bufio.Reader
 )
 
-func readCmd() (string, error) {
+func readCmd() ([]string, error) {
 	if len(currentBucket) > 0 {
 		if len(currentPrefix) > 0 {
 			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd+"> ", currentBucket, targetKey, currentPrefix)
@@ -521,14 +560,80 @@ func readCmd() (string, error) {
 	} else {
 		fmt.Printf(colorTarget+"{%s}"+colorEnd+"> ", targetKey)
 	}
+
 	//TODO could be a bit more advanced for convenience
 	//TODO maybe re-usable readln with provider functions for auto-complete and history?
-	line, err := readln()
-	if err != nil {
-		return "", err
+
+	var sb strings.Builder
+	escape := false
+	doubleQuote := false
+	singleQuote := false
+
+	cmd := make([]string, 0)
+
+	for {
+		line, err := readln()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, r := range line {
+			if singleQuote {
+				if r == '\'' {
+					singleQuote = false
+				} else {
+					sb.WriteRune(r)
+				}
+
+			} else if doubleQuote {
+				if escape {
+					sb.WriteRune(r)
+					escape = false
+
+				} else {
+					if r == '"' {
+						doubleQuote = false
+					} else if r == '\\' {
+						escape = true
+					} else {
+						sb.WriteRune(r)
+					}
+				}
+			} else if escape {
+				sb.WriteRune(r)
+				escape = false
+
+			} else {
+				if r == '\\' {
+					escape = true
+				} else if r == '\'' {
+					singleQuote = true
+				} else if r == '"' {
+					doubleQuote = true
+				} else if r == ' ' {
+					if sb.Len() > 0 {
+						cmd = append(cmd, sb.String())
+						sb.Reset()
+					}
+				} else {
+					sb.WriteRune(r)
+				}
+			}
+		}
+
+		if !escape && !doubleQuote && !singleQuote {
+			break
+		}
+
+		// append line break (in quote or escaped)
+		sb.WriteRune('\n')
 	}
-	//TODO interpret line quotes
-	return line, nil
+
+	if sb.Len() > 0 {
+		cmd = append(cmd, sb.String())
+	}
+
+	return cmd, nil
 }
 
 func readln() (string, error) {
