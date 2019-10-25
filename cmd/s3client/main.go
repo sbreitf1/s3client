@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -65,7 +66,7 @@ func main() {
 	var target S3Target
 	if len(envFile) == 0 {
 		//TODO create temporary target?
-		log.Fatalln("No environment specified.")
+		log.Fatalln("No environment specified. Use \"-e {name}\" to create a new environment or use an existing one.")
 
 	} else {
 		t, err := prepareEnv(envFile)
@@ -140,13 +141,13 @@ func newEnv(key string, filePath string) (S3Target, error) {
 		return S3Target{}, err
 	}
 
-	isDir, err := fs.IsDir(path.Base(filePath))
+	isDir, err := fs.IsDir(path.Dir(filePath))
 	if err != nil {
 		return S3Target{}, err
 	}
 
 	if !isDir {
-		if err := fs.CreateDirectory(path.Base(filePath)); err != nil {
+		if err := fs.CreateDirectory(path.Dir(filePath)); err != nil {
 			return S3Target{}, err
 		}
 	}
@@ -216,20 +217,24 @@ func browse() error {
 			return err
 		}
 
-		switch cmd[0] {
-		case "q":
-			fallthrough
-		case "exit":
-			return nil
+		// ignore empty commands -> same behavior as bash
+		if len(cmd) > 0 {
+			command := strings.TrimSpace(cmd[0])
+			switch command {
+			case "q":
+				fallthrough
+			case "exit":
+				return nil
 
-		//TODO envmod and envdel command?
+			//TODO envmod and envdel command?
 
-		case "":
-			// do nothing here -> same behavior as bash
+			case "":
+				// do nothing here -> same behavior as bash
 
-		default:
-			if err = execCommand(cmd[0], cmd[1:]); err != nil {
-				println("ERR: %s", err.Error())
+			default:
+				if err = execCommand(command, cmd[1:]); err != nil {
+					println("ERR: %s", err.Error())
+				}
 			}
 		}
 	}
@@ -243,7 +248,7 @@ func init() {
 	commands["ls"] = ls
 	commands["rm"] = rm
 	commands["dl"] = dl
-	commands["up"] = up
+	commands["ul"] = ul
 	//TODO cat
 	//TODO find
 	commands["list"] = list
@@ -288,7 +293,7 @@ func printHelp(args []string) error {
 	println("  ls               -  list objects in current bucket and path")
 	println("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects")
 	println("  dl {src} {dst}   -  download a remote file {src} and write to local file {dst}")
-	println("  up {src} {dst}   -  upload local file {src} to remote file {dst}")
+	println("  ul {src} {dst}   -  upload local file {src} to remote file {dst}")
 	println("  list {type}      -  list items of any type in [bucket, object, env]")
 	println("  mkbucket {name}  -  create new bucket with given name")
 	println("  rmbucket {name}  -  delete bucket with given name")
@@ -433,11 +438,42 @@ func rm(args []string) error {
 }
 
 func dl(args []string) error {
-	return fmt.Errorf("The command \"dl\" is not yet implemented")
+	if len(args) == 0 {
+		return fmt.Errorf("no source object specified")
+	}
+	if len(args) == 1 {
+		return fmt.Errorf("no local destination file specified")
+	}
+
+	//TODO check object exists
+
+	objKey := currentPrefix + args[0]
+	println("Source Object: %s", objKey)
+
+	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
+	if err != nil {
+		return err
+	}
+	defer obj.Close()
+
+	f, err := os.Create(args[1])
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	//TODO download with status bar
+	len, err := io.Copy(f, obj)
+	if err != nil {
+		return err
+	}
+
+	println("Completed: %s", humanize.IBytes(uint64(len)))
+	return nil
 }
 
-func up(args []string) error {
-	return fmt.Errorf("The command \"up\" is not yet implemented")
+func ul(args []string) error {
+	return fmt.Errorf("The command \"ul\" is not yet implemented")
 }
 
 func list(args []string) error {
@@ -498,6 +534,7 @@ func rmbucket(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no bucket name given")
 	}
+	//TODO --i-know-what-i-do flag to skip questions
 	if len(args) > 1 {
 		return fmt.Errorf("too many arguments")
 	}
@@ -516,7 +553,7 @@ func rmbucket(args []string) error {
 	println("###  WARNING: POSSIBLE LOSS OF DATA  ###")
 	println("########################################" + colorEnd)
 	println("You are about to delete bucket %q.", bucketName)
-	println("All data will be lost and cannot be restored.")
+	println("All data stored in this bucket will be lost and cannot be restored!")
 	println("Please confirm deletion by entering the bucket name below:")
 	fmt.Print("> ")
 	str, err := readln()
@@ -529,12 +566,28 @@ func rmbucket(args []string) error {
 		return nil
 	}
 
+	println(colorWarning + "#########################################")
+	println("###  WARNING: THIS CAN NOT BE UNDONE  ###")
+	println("#########################################" + colorEnd)
+	println("Are you sure? Please enter DELETE to finally delete the bucket:")
+	fmt.Print("> ")
+	strDELETE, err := readln()
+	if err != nil {
+		return err
+	}
+
+	if strDELETE != "DELETE" {
+		println("Abort. Bucket was NOT deleted")
+		return nil
+	}
+
 	if err := minioClient.RemoveBucket(bucketName); err != nil {
 		return err
 	}
 
 	println("Bucket %q has been deleted", bucketName)
 	if currentBucket == bucketName {
+		// leave deleted bucket if it was entered
 		currentBucket = ""
 		currentPrefix = ""
 	}
@@ -584,6 +637,11 @@ func readCmd() ([]string, error) {
 	cmd := make([]string, 0)
 
 	for {
+		if sb.Len() > 0 {
+			// show empty prompt on new lines
+			fmt.Print("> ")
+		}
+
 		line, err := readln()
 		if err != nil {
 			return nil, err
@@ -649,6 +707,21 @@ func readCmd() ([]string, error) {
 }
 
 func readln() (string, error) {
+	/*buffer := make([]byte, 1024)
+
+	var sb strings.Builder
+
+	for !strings.HasSuffix(sb.String(), "\n") {
+		n, err := os.Stdin.Read(buffer)
+		if err != nil {
+			return "", err
+		}
+
+		sb.Write(buffer[:n])
+	}
+
+	return sb.String(), nil*/
+
 	// does not offer any helper
 	text, err := reader.ReadString('\n')
 	if err != nil {
