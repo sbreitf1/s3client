@@ -429,6 +429,9 @@ func mkbucket(args []string) error {
 		return err
 	}
 
+	if len(currentBucket) == 0 {
+		currentBucket = bucketName
+	}
 	println("bucket %q created", bucketName)
 	return nil
 }
