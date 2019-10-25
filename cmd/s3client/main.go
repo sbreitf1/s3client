@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -152,7 +153,7 @@ func init() {
 	commands["rm"] = rm
 	commands["dl"] = dl
 	commands["ul"] = ul
-	//TODO cat
+	commands["cat"] = cat
 	//TODO find
 	commands["list"] = list
 	commands["mkbucket"] = mkbucket
@@ -194,9 +195,10 @@ func printHelp(args []string) error {
 	println("  leave            -  leave current bucket")
 	println("  cd               -  enter named directory or \"..\" for parent dir")
 	println("  ls               -  list objects in current bucket and path")
-	println("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects")
-	println("  dl {src} {dst}   -  download a remote file {src} and write to local file {dst}")
-	println("  ul {src} {dst}   -  upload local file {src} to remote file {dst}")
+	println("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects recursively")
+	println("  dl {src} {dst}   -  download a remote object {src} and write to local file {dst}")
+	println("  ul {src} {dst}   -  upload local file {src} to remote object {dst}")
+	println("  cat {name}       -  print content of object {name}")
 	println("  list {type}      -  list items of any type in [bucket, object, env]")
 	println("  mkbucket {name}  -  create new bucket with given name")
 	println("  rmbucket {name}  -  delete bucket with given name")
@@ -237,6 +239,7 @@ func leave(args []string) error {
 
 func cd(args []string) error {
 	if len(args) == 0 {
+		//TODO select from list
 		return fmt.Errorf("no directory specified")
 	}
 	if len(args) > 1 {
@@ -342,6 +345,7 @@ func rm(args []string) error {
 
 func dl(args []string) error {
 	if len(args) == 0 {
+		//TODO select from list and enter local file name
 		return fmt.Errorf("no source object specified")
 	}
 	if len(args) == 1 {
@@ -379,8 +383,37 @@ func ul(args []string) error {
 	return fmt.Errorf("The command \"ul\" is not yet implemented")
 }
 
+func cat(args []string) error {
+	if len(args) == 0 {
+		//TODO select from list
+		return fmt.Errorf("no object specified")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments")
+	}
+
+	//TODO check object exists and ask for large/binary files
+
+	objKey := currentPrefix + args[0]
+	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
+	if err != nil {
+		return err
+	}
+	defer obj.Close()
+
+	//TODO download with status bar
+	var buffer bytes.Buffer
+	if _, err := io.Copy(&buffer, obj); err != nil {
+		return err
+	}
+
+	println(buffer.String())
+	return nil
+}
+
 func list(args []string) error {
 	if len(args) == 0 {
+		//TODO select from list
 		return fmt.Errorf("no item type specified. Type \"list bucket\" to show a list of all buckets")
 	}
 	if len(args) > 1 {
@@ -408,6 +441,8 @@ func list(args []string) error {
 				println("  B  %s", b.Name)
 			}
 		}
+
+	//TODO object and env
 
 	default:
 		return fmt.Errorf("unkown list type %q. Possible parameters are \"bucket\", \"object\" and \"env\"", args[0])
@@ -438,6 +473,7 @@ func mkbucket(args []string) error {
 
 func rmbucket(args []string) error {
 	if len(args) == 0 {
+		//TODO select from list
 		return fmt.Errorf("no bucket name given")
 	}
 	//TODO --i-know-what-i-do flag to skip questions
