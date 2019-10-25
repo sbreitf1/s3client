@@ -2,23 +2,18 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"log"
 	"os"
-	"os/user"
-	"path"
 	"strings"
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
-	"github.com/sbreitf1/fs"
 )
 
 // S3Target contains address and credentials of a S3 endpoint.
 type S3Target struct {
+	SourceFile    string
 	Key           string `json:"key"`
 	Endpoint      string `json:"endpoint"`
 	Secure        bool   `json:"secure"`
@@ -31,7 +26,7 @@ type S3Target struct {
 
 var (
 	// application and connection state
-	targetKey     string
+	currentTarget S3Target
 	minioClient   *minio.Client
 	currentBucket string
 	currentPrefix string
@@ -42,20 +37,20 @@ func main() {
 	args := make([]string, 0)
 
 	// temporary parser state
-	envFile := ""
-	envFileMode := false
+	envKey := ""
+	envKeyMode := false
 
 	for i := 1; i < len(os.Args); i++ {
-		if envFileMode {
-			// read environment file and return to normal command line parser state
-			envFile = os.Args[i]
-			envFileMode = false
+		if envKeyMode {
+			// read environment key and return to normal command line parser state
+			envKey = os.Args[i]
+			envKeyMode = false
 
 		} else {
-			// only read environment file once -> further "-e" args might be part of actual command
-			if len(envFile) == 0 && os.Args[i] == "-e" {
-				// next parameter contains the environment file
-				envFileMode = true
+			// only read environment key once -> further "-e" args might be part of actual command
+			if len(envKey) == 0 && os.Args[i] == "-e" {
+				// next parameter contains the environment key
+				envKeyMode = true
 			} else {
 				// append to command
 				args = append(args, os.Args[i])
@@ -63,21 +58,23 @@ func main() {
 		}
 	}
 
-	var target S3Target
-	if len(envFile) == 0 {
-		//TODO create temporary target?
-		log.Fatalln("No environment specified. Use \"-e {name}\" to create a new environment or use an existing one.")
+	if len(envKey) == 0 && len(args) > 0 {
+		// the user seems helpless
+		println("Usage:")
+		println("  - Create new environment with \"-e {name}\" and use with same arguments")
+		println("  - Type \"help\" to see a list of available commands")
+		os.Exit(1)
+	}
 
-	} else {
-		t, err := prepareEnv(envFile)
-		if err != nil {
-			log.Fatalln(err.Error())
-		}
-		target = t
+	target, err := prepareEnv(envKey)
+	if err != nil {
+		println(err.Error())
+		os.Exit(1)
 	}
 
 	if err := connect(target); err != nil {
-		log.Fatalln(err.Error())
+		println(err.Error())
+		os.Exit(1)
 	}
 
 	//TODO some connection check?
@@ -91,115 +88,21 @@ func main() {
 	if len(args) > 0 {
 		// command specified as input? execute and then exit
 		if err := execLine(args); err != nil {
-			log.Fatalln(err.Error())
+			println(err.Error())
+			os.Exit(1)
 		}
 
 	} else {
 		// interactive mode
 		if err := browse(); err != nil {
-			log.Fatalln(err.Error())
+			println(err.Error())
+			os.Exit(1)
 		}
 	}
-}
-
-func prepareEnv(key string) (S3Target, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	filePath := path.Join(usr.HomeDir, ".s3client/"+key+".json")
-	f, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return newEnv(key, filePath)
-		}
-		return S3Target{}, err
-	}
-
-	data, err := ioutil.ReadAll(f)
-	if err != nil {
-		return S3Target{}, fmt.Errorf("unable to read environment file: %s", err.Error())
-	}
-
-	var target S3Target
-	if err := json.Unmarshal(data, &target); err != nil {
-		return S3Target{}, fmt.Errorf("malformed environment file: %s", err.Error())
-	}
-	return target, nil
-}
-
-func newEnv(key string, filePath string) (S3Target, error) {
-	println("The environment %q does not exist and will be created:", key)
-	target, err := enterTarget(key)
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	data, err := json.Marshal(&target)
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	isDir, err := fs.IsDir(path.Dir(filePath))
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	if !isDir {
-		if err := fs.CreateDirectory(path.Dir(filePath)); err != nil {
-			return S3Target{}, err
-		}
-	}
-
-	if err := ioutil.WriteFile(filePath, data, os.ModePerm); err != nil {
-		return S3Target{}, err
-	}
-
-	return target, nil
-}
-
-func enterTarget(key string) (S3Target, error) {
-	fmt.Print("URL> ")
-	url, err := readlnNonEmpty()
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	var secure bool
-	if strings.HasPrefix(strings.ToLower(url), "http://") {
-		url = url[7:]
-		secure = false
-	} else if strings.HasPrefix(strings.ToLower(url), "https://") {
-		url = url[8:]
-		secure = true
-	} else {
-		fmt.Print("Secure (yes/no)?> ")
-		str, err := readlnNonEmpty()
-		if err != nil {
-			return S3Target{}, err
-		}
-
-		secure = (str[0] == 'y' || str[0] == 'Y')
-	}
-
-	fmt.Print("Access Key> ")
-	accessKey, err := readlnNonEmpty()
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	fmt.Print("Secret Key> ")
-	secretKey, err := readlnNonEmpty()
-	if err != nil {
-		return S3Target{}, err
-	}
-
-	return S3Target{Key: key, Endpoint: url, Secure: secure, AccessKey: accessKey, SecretKey: secretKey}, nil
 }
 
 func connect(target S3Target) error {
-	targetKey = target.Key
+	currentTarget = target
 	client, err := minio.New(target.Endpoint, target.AccessKey, target.SecretKey, target.Secure)
 	if err != nil {
 		return err
@@ -494,7 +397,7 @@ func list(args []string) error {
 		}
 
 		if len(buckets) == 0 {
-			println("No buckets found. Use \"mkbuckets bucket-name\" to create one")
+			println("No buckets found. Use \"mkbucket {name}\" to create one")
 		} else {
 			if len(buckets) == 1 {
 				println("Found 1 bucket:")
@@ -618,12 +521,12 @@ var (
 func readCmd() ([]string, error) {
 	if len(currentBucket) > 0 {
 		if len(currentPrefix) > 0 {
-			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd+"> ", currentBucket, targetKey, currentPrefix)
+			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd+"> ", currentBucket, currentTarget.Key, currentPrefix)
 		} else {
-			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+"> ", currentBucket, targetKey)
+			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+"> ", currentBucket, currentTarget.Key)
 		}
 	} else {
-		fmt.Printf(colorTarget+"{%s}"+colorEnd+"> ", targetKey)
+		fmt.Printf(colorTarget+"{%s}"+colorEnd+"> ", currentTarget.Key)
 	}
 
 	//TODO could be a bit more advanced for convenience
