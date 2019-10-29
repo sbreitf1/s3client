@@ -288,7 +288,25 @@ func cp(args []string) error {
 }
 
 func touch(args []string) error {
-	return fmt.Errorf("Command \"touch\" is not implemented yet")
+	if err := checkArgs(args, argOptions{ArgLabels: []string{"object name"}, MinArgs: 1, RequireBucket: true}); err != nil {
+		return err
+	}
+
+	exists, err := exists(currentPrefix + args[0])
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("Object %q already exists", args[0])
+	}
+
+	r := bytes.NewReader([]byte{})
+	if _, err := minioClient.PutObject(currentBucket, currentPrefix+args[0], r, 0, minio.PutObjectOptions{}); err != nil {
+		return err
+	}
+
+	printlnf("Object has been created")
+	return nil
 }
 
 func cat(args []string) error {
