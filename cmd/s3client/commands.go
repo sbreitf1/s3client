@@ -12,21 +12,24 @@ import (
 )
 
 func help(args []string) error {
-	println("Available commands:")
-	println("  exit             -  exit application")
-	println("  help             -  show this help")
-	println("  enter {name}     -  enter bucket with given name")
-	println("  leave            -  leave current bucket")
-	println("  cd               -  enter named directory or \"..\" for parent dir")
-	println("  ls               -  list objects in current bucket and path")
-	println("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects recursively")
-	println("  dl {src} {dst}   -  download a remote object {src} and write to local file {dst}")
-	println("  ul {src} {dst}   -  upload local file {src} to remote object {dst}")
-	println("  cat {name}       -  print content of object {name}")
-	println("  find {needle}    -  list all objects with given {needle} in last part of object key")
-	println("  list {type}      -  list items of any type in [bucket, object, env]")
-	println("  mkbucket {name}  -  create new bucket with given name")
-	println("  rmbucket {name}  -  delete bucket with given name")
+	printlnf("Available commands:")
+	printlnf("  exit             -  exit application")
+	printlnf("  help             -  show this help")
+	printlnf("  enter {name}     -  enter bucket with given name")
+	printlnf("  leave            -  leave current bucket")
+	printlnf("  cd               -  enter named directory or \"..\" for parent dir")
+	printlnf("  ls               -  list objects in current bucket and path")
+	printlnf("  rm {name}        -  remove object. Use \"-r\" flag to remove all prefixed objects recursively")
+	printlnf("  dl {src} {dst}   -  download a remote object {src} and write to local file {dst}")
+	printlnf("  ul {src} {dst}   -  upload local file {src} to remote object {dst}")
+	printlnf("  mv {src} {dst}   -  copies a remote object {src} to new key {dst} and deletes {src}")
+	printlnf("  cp {src} {dst}   -  copies a remote object {src} to new key {dst}")
+	printlnf("  touch {name}     -  creates an empty object with key {name}")
+	printlnf("  cat {name}       -  print content of object {name}")
+	printlnf("  find {needle}    -  list all objects with given {needle} in last part of object key")
+	printlnf("  list {type}      -  list items of any type in [bucket, env]")
+	printlnf("  mkbucket {name}  -  create new bucket with given name")
+	printlnf("  rmbucket {name}  -  delete bucket with given name")
 	return nil
 }
 
@@ -73,11 +76,9 @@ func cd(args []string) error {
 	}
 
 	if len(currentBucket) == 0 {
-		println("No bucket entered yet. Entering bucket %q instead", args[0])
+		printlnf("No bucket entered yet. Entering bucket %q instead", args[0])
 		return enter([]string{args[0]})
 	}
-
-	//TODO check existence?
 
 	if args[0] == ".." {
 		prefix := strings.TrimRight(currentPrefix, "/")
@@ -88,6 +89,16 @@ func cd(args []string) error {
 			currentPrefix = ""
 		}
 	} else {
+		isFile, isDir, _, err := stat(currentPrefix + args[0])
+		if err != nil {
+			return err
+		}
+		if isFile {
+			return fmt.Errorf("%q is a file", args[0])
+		} else if !isDir {
+			return fmt.Errorf("Directory %q not found", args[0])
+		}
+
 		currentPrefix += args[0] + "/"
 	}
 
@@ -100,7 +111,7 @@ func ls(args []string) error {
 	}
 
 	if len(currentBucket) == 0 {
-		println("No bucket entered yet. Listing buckets instead")
+		printlnf("No bucket entered yet. Listing buckets instead")
 		return list([]string{"bucket"})
 	}
 
@@ -111,13 +122,41 @@ func ls(args []string) error {
 		} else {
 			prefix = args[0] + "/"
 		}
+
+		//TODO check existence
 	}
 
 	return printObjects(prefix, nil, nil)
 }
 
 func rm(args []string) error {
-	return fmt.Errorf("The command \"rm\" is not yet implemented")
+	if err := checkArgs(args, argOptions{ArgLabels: []string{"object name", "arg"}, MinArgs: 1, RequireBucket: true}); err != nil {
+		return err
+	}
+
+	isFile, isDir, _, err := stat(currentPrefix + args[0])
+	if err != nil {
+		return err
+	}
+
+	//TODO go back to parent dir if dir is now gone
+	if isFile {
+		err := minioClient.RemoveObject(currentBucket, currentPrefix+args[0])
+		if err == nil {
+			printlnf("Object %q has been deleted", args[0])
+		}
+		return err
+	} else if isDir {
+		if len(args) < 2 || args[1] != "-r" {
+			return fmt.Errorf("Please use \"rm {name} -r\" when deleting a directory")
+		}
+
+		//TODO remove all objects with prefix
+		return nil
+
+	} else {
+		return fmt.Errorf("Object %q does not exist", args[0])
+	}
 }
 
 func dl(args []string) error {
@@ -128,7 +167,7 @@ func dl(args []string) error {
 	//TODO check object exists
 
 	objKey := currentPrefix + args[0]
-	println("Source Object: %s", objKey)
+	printlnf("Source Object: %s", objKey)
 
 	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
 	if err != nil {
@@ -142,18 +181,114 @@ func dl(args []string) error {
 	}
 	defer f.Close()
 
+	//TODO download dir
 	//TODO download with status bar
 	len, err := io.Copy(f, obj)
 	if err != nil {
 		return err
 	}
 
-	println("Completed: %s", humanize.IBytes(uint64(len)))
+	printlnf("Completed: %s", humanize.IBytes(uint64(len)))
 	return nil
 }
 
 func ul(args []string) error {
-	return fmt.Errorf("The command \"ul\" is not yet implemented")
+	if err := checkArgs(args, argOptions{ArgLabels: []string{"source", "destination"}, MinArgs: 2, RequireBucket: true}); err != nil {
+		return err
+	}
+
+	//TODO overwrite checks
+
+	objKey := currentPrefix + args[1]
+	printlnf("Upload local file to: %s", objKey)
+
+	//TODO upload dir
+	//TODO upload with status bar
+	len, err := minioClient.FPutObject(currentBucket, objKey, args[0], minio.PutObjectOptions{})
+	if err != nil {
+		return err
+	}
+
+	printlnf("Completed: %s", humanize.IBytes(uint64(len)))
+	return nil
+}
+
+func mv(args []string) error {
+	if err := checkArgs(args, argOptions{ArgLabels: []string{"source", "destination"}, MinArgs: 2, RequireBucket: true}); err != nil {
+		return err
+	}
+
+	isFile, isDir, _, err := stat(currentPrefix + args[0])
+	if err != nil {
+		return err
+	}
+
+	if isFile {
+		src := minio.NewSourceInfo(currentBucket, currentPrefix+args[0], nil)
+		dst, err := minio.NewDestinationInfo(currentBucket, currentPrefix+args[1], nil, nil)
+		if err != nil {
+			return err
+		}
+
+		//TODO how to move to parent dir?
+
+		// S3 does not support renaming -> copy and delte old one instead
+		if err := minioClient.CopyObject(dst, src); err != nil {
+			return fmt.Errorf("Failed to clone object: %s", err.Error())
+		}
+
+		if err := minioClient.RemoveObject(currentBucket, currentPrefix+args[0]); err != nil {
+			return fmt.Errorf("Unable to delete old object: %s", err.Error())
+		}
+
+		printlnf("Object has been moved")
+		return nil
+
+	} else if isDir {
+		return fmt.Errorf("Moving directories is not supported yet")
+
+	} else {
+		return fmt.Errorf("Object %q does not exist", args[0])
+	}
+}
+
+func cp(args []string) error {
+	if err := checkArgs(args, argOptions{ArgLabels: []string{"source", "destination"}, MinArgs: 2, RequireBucket: true}); err != nil {
+		return err
+	}
+
+	isFile, isDir, _, err := stat(currentPrefix + args[0])
+	if err != nil {
+		return err
+	}
+
+	if isFile {
+		src := minio.NewSourceInfo(currentBucket, currentPrefix+args[0], nil)
+		dst, err := minio.NewDestinationInfo(currentBucket, currentPrefix+args[1], nil, nil)
+		if err != nil {
+			return err
+		}
+
+		//TODO how to copy to parent dir?
+
+		// S3 does not support renaming -> copy and delte old one instead
+		if err := minioClient.CopyObject(dst, src); err != nil {
+			return fmt.Errorf("Failed to clone object: %s", err.Error())
+		}
+
+		printlnf("Object has been copied")
+		return nil
+
+	} else if isDir {
+		return fmt.Errorf("Copying directories is not supported yet")
+
+	} else {
+		return fmt.Errorf("Object %q does not exist", args[0])
+	}
+}
+
+func touch(args []string) error {
+	return fmt.Errorf("Command \"touch\" is not implemented yet")
 }
 
 func cat(args []string) error {
@@ -161,7 +296,17 @@ func cat(args []string) error {
 		return err
 	}
 
-	//TODO check object exists and ask for large/binary files
+	isFile, isDir, _, err := stat(currentPrefix + args[0])
+	if err != nil {
+		return err
+	}
+	if isDir {
+		return fmt.Errorf("%q is a directory", args[0])
+	} else if !isFile {
+		return fmt.Errorf("File %q not found", args[0])
+	}
+
+	//TODO warn for large files
 
 	objKey := currentPrefix + args[0]
 	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
@@ -194,6 +339,8 @@ func find(args []string) error {
 		} else {
 			prefix = args[1] + "/"
 		}
+
+		//TODO check directory exists
 	}
 
 	return printObjects(prefix,
@@ -244,19 +391,19 @@ func list(args []string) error {
 		}
 
 		if len(buckets) == 0 {
-			println("No buckets found. Use \"mkbucket {name}\" to create one")
+			printlnf("No buckets found. Use \"mkbucket {name}\" to create one")
 		} else {
 			if len(buckets) == 1 {
-				println("Found 1 bucket:")
+				printlnf("Found 1 bucket:")
 			} else {
-				println("Found %d buckets:", len(buckets))
+				printlnf("Found %d buckets:", len(buckets))
 			}
 			for _, b := range buckets {
-				println("  B  %s", b.Name)
+				printlnf("  B  %s", b.Name)
 			}
 		}
 
-	//TODO object and env
+	//TODO env
 
 	default:
 		return fmt.Errorf("unkown list type %q. Possible parameters are \"bucket\", \"object\" and \"env\"", args[0])
@@ -278,7 +425,7 @@ func mkbucket(args []string) error {
 	if len(currentBucket) == 0 {
 		currentBucket = bucketName
 	}
-	println("bucket %q created", bucketName)
+	printlnf("bucket %q created", bucketName)
 	return nil
 }
 
@@ -298,12 +445,12 @@ func rmbucket(args []string) error {
 		return fmt.Errorf("bucket %q does not exist", bucketName)
 	}
 
-	println(colorWarning + "########################################")
-	println("###  WARNING: POSSIBLE LOSS OF DATA  ###")
-	println("########################################" + colorEnd)
-	println("You are about to delete bucket %q.", bucketName)
-	println("All data stored in this bucket will be lost and cannot be restored!")
-	println("Please confirm deletion by entering the bucket name below:")
+	printlnf(colorWarning + "########################################")
+	printlnf("###  WARNING: POSSIBLE LOSS OF DATA  ###")
+	printlnf("########################################" + colorEnd)
+	printlnf("You are about to delete bucket %q.", bucketName)
+	printlnf("All data stored in this bucket will be lost and cannot be restored!")
+	printlnf("Please confirm deletion by entering the bucket name below:")
 	fmt.Print("> ")
 	str, err := readln()
 	if err != nil {
@@ -311,14 +458,14 @@ func rmbucket(args []string) error {
 	}
 
 	if str != bucketName {
-		println("Input mismatch. Bucket was NOT deleted")
+		printlnf("Input mismatch. Bucket was NOT deleted")
 		return nil
 	}
 
-	println(colorWarning + "#########################################")
-	println("###  WARNING: THIS CAN NOT BE UNDONE  ###")
-	println("#########################################" + colorEnd)
-	println("Are you sure? Please enter DELETE to finally delete the bucket:")
+	printlnf(colorWarning + "#########################################")
+	printlnf("###  WARNING: THIS CAN NOT BE UNDONE  ###")
+	printlnf("#########################################" + colorEnd)
+	printlnf("Are you sure? Please enter DELETE to finally delete the bucket:")
 	fmt.Print("> ")
 	strDELETE, err := readln()
 	if err != nil {
@@ -326,7 +473,7 @@ func rmbucket(args []string) error {
 	}
 
 	if strDELETE != "DELETE" {
-		println("Abort. Bucket was NOT deleted")
+		printlnf("Abort. Bucket was NOT deleted")
 		return nil
 	}
 
@@ -334,7 +481,7 @@ func rmbucket(args []string) error {
 		return err
 	}
 
-	println("Bucket %q has been deleted", bucketName)
+	printlnf("Bucket %q has been deleted", bucketName)
 	if currentBucket == bucketName {
 		// leave deleted bucket if it was entered
 		currentBucket = ""
@@ -371,6 +518,56 @@ func checkArgs(args []string, options argOptions) error {
 	return nil
 }
 
+func exists(key string) (bool, error) {
+	isFile, isDir, _, err := stat(key)
+	if err != nil {
+		return false, err
+	}
+	return (isFile || isDir), nil
+}
+
+func isFile(key string) (bool, error) {
+	isFile, _, _, err := stat(key)
+	if err != nil {
+		return false, err
+	}
+	return isFile, nil
+}
+
+func isDir(key string) (bool, error) {
+	_, isDir, _, err := stat(key)
+	if err != nil {
+		return false, err
+	}
+	return isDir, nil
+}
+
+func stat(key string) (bool, bool, int64, error) {
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+
+	if strings.HasSuffix(key, "/") {
+		key = key[:len(key)-1]
+	}
+	dirKey := key + "/"
+	fileKey := key
+
+	objectCh := minioClient.ListObjectsV2(currentBucket, key, false, doneCh)
+	for obj := range objectCh {
+		if obj.Err != nil {
+			return false, false, 0, fmt.Errorf("failed to access object: %v", obj.Err)
+		}
+
+		if obj.Key == dirKey {
+			return false, true, 0, nil
+		} else if obj.Key == fileKey {
+			return true, false, obj.Size, nil
+		}
+	}
+
+	return false, false, 0, nil
+}
+
 func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatter func(string) string) error {
 	if filter == nil {
 		filter = func(minio.ObjectInfo) bool { return true }
@@ -400,12 +597,12 @@ func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatt
 	}
 
 	if len(list) == 0 {
-		println("No objects found.")
+		printlnf("No objects found.")
 	} else {
 		if len(list) == 1 {
-			println("Found 1 object:")
+			printlnf("Found 1 object:")
 		} else {
-			println("Found %d objects:", len(list))
+			printlnf("Found %d objects:", len(list))
 		}
 
 		dirPadding := ""
@@ -418,7 +615,7 @@ func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatt
 
 		for _, obj := range list {
 			if strings.HasSuffix(obj.Key, "/") {
-				println("  D  %s%s", dirPadding, nameFormatter(obj.Key[len(prefix):len(obj.Key)-1]))
+				printlnf("  D  %s%s", dirPadding, nameFormatter(obj.Key[len(prefix):len(obj.Key)-1]))
 			} else {
 				sizeStr := humanize.IBytes(uint64(obj.Size))
 				if strings.HasSuffix(sizeStr, " B") {
@@ -426,7 +623,7 @@ func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatt
 					sizeStr = sizeStr + "  "
 				}
 				padding := strings.Repeat(" ", 11-len(sizeStr))
-				println("  F  %s%s  %s", padding, sizeStr, nameFormatter(obj.Key[len(prefix):]))
+				printlnf("  F  %s%s  %s", padding, sizeStr, nameFormatter(obj.Key[len(prefix):]))
 			}
 		}
 	}

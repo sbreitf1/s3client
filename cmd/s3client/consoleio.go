@@ -151,7 +151,11 @@ func readlnNonEmpty() (string, error) {
 	return line, nil
 }
 
-func println(format string, args ...interface{}) {
+func println(a ...interface{}) {
+	fmt.Println(a...)
+}
+
+func printlnf(format string, args ...interface{}) {
 	fmt.Println(fmt.Sprintf(format, args...))
 }
 

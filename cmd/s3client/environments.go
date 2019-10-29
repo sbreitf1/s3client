@@ -41,7 +41,7 @@ func getEnvironments() ([]S3Target, error) {
 		if !f.IsDir() {
 			target, err := readEnv(path.Join(configDir, f.Name()))
 			if err != nil {
-				println("WARN: failed to load environment %q: %s", f.Name(), err.Error())
+				printlnf("WARN: failed to load environment %q: %s", f.Name(), err.Error())
 			}
 
 			environments = append(environments, target)
@@ -70,7 +70,7 @@ func prepareEnv(key string) (S3Target, error) {
 
 	target, err := loadOrCreateEnv(key)
 	if err != nil {
-		println(err.Error())
+		printlnf(err.Error())
 		os.Exit(1)
 	}
 
@@ -151,7 +151,7 @@ func readEnv(filePath string) (S3Target, error) {
 }
 
 func newEnv(key string, filePath string) (S3Target, error) {
-	println("The environment %q does not exist and will be created:", key)
+	printlnf("The environment %q does not exist and will be created:", key)
 	target, err := enterTarget(key)
 	if err != nil {
 		return S3Target{}, err

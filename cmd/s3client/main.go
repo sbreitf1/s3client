@@ -57,20 +57,20 @@ func main() {
 
 	if len(envKey) == 0 && len(args) > 0 {
 		// the user seems helpless
-		println("Usage:")
-		println("  - Create new environment with \"-e {name}\" and use with same arguments")
-		println("  - Type \"help\" to see a list of available commands")
+		printlnf("Usage:")
+		printlnf("  - Create new environment with \"-e {name}\" and use with same arguments")
+		printlnf("  - Type \"help\" to see a list of available commands")
 		os.Exit(1)
 	}
 
 	target, err := prepareEnv(envKey)
 	if err != nil {
-		println(err.Error())
+		printlnf(err.Error())
 		os.Exit(1)
 	}
 
 	if err := connect(target); err != nil {
-		println(err.Error())
+		printlnf(err.Error())
 		os.Exit(1)
 	}
 
@@ -78,21 +78,21 @@ func main() {
 	if len(target.DefaultBucket) > 0 {
 		if err := enter([]string{target.DefaultBucket}); err != nil {
 			currentBucket = ""
-			println(err.Error())
+			printlnf(err.Error())
 		}
 	}
 
 	if len(args) > 0 {
 		// command specified as input? execute and then exit
 		if err := execLine(args); err != nil {
-			println(err.Error())
+			printlnf(err.Error())
 			os.Exit(1)
 		}
 
 	} else {
 		// interactive mode
 		if err := browse(); err != nil {
-			println(err.Error())
+			printlnf(err.Error())
 			os.Exit(1)
 		}
 	}
@@ -133,7 +133,7 @@ func browse() error {
 
 			default:
 				if err = execCommand(command, cmd[1:]); err != nil {
-					println("ERR: %s", err.Error())
+					printlnf("ERR: %s", err.Error())
 				}
 			}
 		}
@@ -149,6 +149,9 @@ func init() {
 	commands["rm"] = rm
 	commands["dl"] = dl
 	commands["ul"] = ul
+	commands["mv"] = mv
+	commands["cp"] = cp
+	commands["touch"] = touch
 	commands["cat"] = cat
 	commands["find"] = find
 	commands["list"] = list
