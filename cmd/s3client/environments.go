@@ -101,7 +101,11 @@ func selectEnv() (S3Target, error) {
 	promptList := make([]string, len(environments))
 	for i := range environments {
 		padding := strings.Repeat(" ", maxKeyLen-len(environments[i].Key))
-		promptList[i] = fmt.Sprintf("%s%s  ->  %s", environments[i].Key, padding, environments[i].Endpoint)
+		endpoint := environments[i].Endpoint
+		if len(environments[i].DefaultBucket) > 0 {
+			endpoint = environments[i].DefaultBucket + "@" + endpoint
+		}
+		promptList[i] = fmt.Sprintf("%s%s  ->  %s", environments[i].Key, padding, endpoint)
 	}
 	ui := promptui.Select{Label: "Select environment or option", Items: promptList}
 	index, _, err := ui.Run()
@@ -212,7 +216,7 @@ func enterTarget(key string) (S3Target, error) {
 	}
 
 	fmt.Print("Secret Key> ")
-	secretKey, err := readlnNonEmpty()
+	secretKey, err := readpwNonEmpty()
 	if err != nil {
 		return S3Target{}, err
 	}

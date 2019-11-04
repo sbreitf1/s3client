@@ -297,6 +297,7 @@ func touch(args []string) error {
 		return err
 	}
 	if exists {
+		//TODO update last modified of existing files?
 		return fmt.Errorf("Object %q already exists", args[0])
 	}
 

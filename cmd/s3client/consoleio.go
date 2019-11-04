@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sbreitf1/go-console"
 )
 
 var (
@@ -117,31 +119,26 @@ func readCmd() ([]string, error) {
 }
 
 func readln() (string, error) {
-	/*buffer := make([]byte, 1024)
-
-	var sb strings.Builder
-
-	for !strings.HasSuffix(sb.String(), "\n") {
-		n, err := os.Stdin.Read(buffer)
-		if err != nil {
-			return "", err
-		}
-
-		sb.Write(buffer[:n])
-	}
-
-	return sb.String(), nil*/
-
-	// does not offer any helper
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	return text[:len(text)-1], nil
+	return console.ReadLine()
 }
 
 func readlnNonEmpty() (string, error) {
 	line, err := readln()
+	if err != nil {
+		return "", err
+	}
+	if len(line) == 0 {
+		return "", errUserAbort{}
+	}
+	return line, nil
+}
+
+func readpw() (string, error) {
+	return console.ReadPassword()
+}
+
+func readpwNonEmpty() (string, error) {
+	line, err := readpw()
 	if err != nil {
 		return "", err
 	}
