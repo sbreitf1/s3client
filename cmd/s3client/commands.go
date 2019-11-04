@@ -9,6 +9,9 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
+	"github.com/sbreitf1/errors"
+	"github.com/sbreitf1/fs"
+	"github.com/sbreitf1/fs/path"
 )
 
 func help(args []string) error {
@@ -134,24 +137,46 @@ func rm(args []string) error {
 		return err
 	}
 
-	isFile, isDir, _, err := stat(currentPrefix + args[0])
+	prefix := currentPrefix + args[0]
+	isFile, isDir, _, err := stat(prefix)
 	if err != nil {
 		return err
 	}
 
 	//TODO go back to parent dir if dir is now gone
 	if isFile {
-		err := minioClient.RemoveObject(currentBucket, currentPrefix+args[0])
+		err := minioClient.RemoveObject(currentBucket, prefix)
 		if err == nil {
 			printlnf("Object %q has been deleted", args[0])
 		}
 		return err
+
 	} else if isDir {
 		if len(args) < 2 || args[1] != "-r" {
 			return fmt.Errorf("Please use \"rm {name} -r\" when deleting a directory")
 		}
 
-		//TODO remove all objects with prefix
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+
+		// remove all objects with given prefix
+		objectCh := minioClient.ListObjectsV2(currentBucket, prefix, true, doneCh)
+		for obj := range objectCh {
+			if obj.Err != nil {
+				return fmt.Errorf("failed to access object: %v", obj.Err)
+			}
+
+			if err := minioClient.RemoveObject(currentBucket, obj.Key); err != nil {
+				return err
+			}
+
+			printlnf("  object %q has been deleted", obj.Key[len(prefix):])
+		}
+
 		return nil
 
 	} else {
@@ -167,29 +192,92 @@ func dl(args []string) error {
 	//TODO check object exists
 
 	objKey := currentPrefix + args[0]
-	printlnf("Source Object: %s", objKey)
-
-	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
+	isFile, isDir, _, err := stat(objKey)
 	if err != nil {
 		return err
+	}
+
+	if isFile {
+		printlnf("Source Object: %s", objKey)
+
+		len, err := downloadObject(objKey, args[1])
+		if err != nil {
+			return err
+		}
+
+		printlnf("Completed: %s", humanize.IBytes(uint64(len)))
+		return nil
+
+	} else if isDir {
+		printlnf("Source directory: %s", objKey)
+
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		prefix := objKey
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+
+		// find all objects
+		list := make([]minio.ObjectInfo, 0)
+		objectCh := minioClient.ListObjectsV2(currentBucket, prefix, true, doneCh)
+		for obj := range objectCh {
+			if obj.Err != nil {
+				return fmt.Errorf("failed to access object: %v", obj.Err)
+			}
+
+			list = append(list, obj)
+		}
+
+		if len(list) == 0 {
+			printlnf("Directory is empty")
+		} else {
+			var totalLen uint64
+
+			localDir := args[1]
+
+			for _, obj := range list {
+				localPath := path.Join(localDir, obj.Key[len(prefix):])
+				os.MkdirAll(path.Dir(localPath), os.ModePerm)
+				printlnf("  downloading file %s", obj.Key[len(prefix):])
+				len, err := downloadObject(obj.Key, localPath)
+				if err != nil {
+					return err
+				}
+
+				totalLen += uint64(len)
+			}
+
+			if len(list) == 1 {
+				printlnf("Completed: %s (%d file)", humanize.IBytes(totalLen), len(list))
+			} else {
+				printlnf("Completed: %s (%d files)", humanize.IBytes(totalLen), len(list))
+			}
+		}
+		return nil
+
+	} else {
+
+		return fmt.Errorf("Object %q does not exist", args[0])
+	}
+}
+
+func downloadObject(objKey, filePath string) (int64, error) {
+	obj, err := minioClient.GetObject(currentBucket, objKey, minio.GetObjectOptions{})
+	if err != nil {
+		return 0, err
 	}
 	defer obj.Close()
 
-	f, err := os.Create(args[1])
+	f, err := os.Create(filePath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
 
-	//TODO download dir
 	//TODO download with status bar
-	len, err := io.Copy(f, obj)
-	if err != nil {
-		return err
-	}
-
-	printlnf("Completed: %s", humanize.IBytes(uint64(len)))
-	return nil
+	return io.Copy(f, obj)
 }
 
 func ul(args []string) error {
@@ -199,18 +287,66 @@ func ul(args []string) error {
 
 	//TODO overwrite checks
 
+	localPath := args[0]
 	objKey := currentPrefix + args[1]
-	printlnf("Upload local file to: %s", objKey)
 
-	//TODO upload dir
-	//TODO upload with status bar
-	len, err := minioClient.FPutObject(currentBucket, objKey, args[0], minio.PutObjectOptions{})
-	if err != nil {
+	if isFile, err := fs.IsFile(localPath); err != nil {
 		return err
+	} else if isFile {
+
+		printlnf("Upload local file to: %s", objKey)
+
+		len, err := uploadObject(localPath, objKey)
+		if err != nil {
+			return err
+		}
+
+		printlnf("Completed: %s", humanize.IBytes(uint64(len)))
+		return nil
 	}
 
-	printlnf("Completed: %s", humanize.IBytes(uint64(len)))
+	if isDir, err := fs.IsDir(localPath); err != nil {
+		return err
+	} else if isDir {
+
+		prefix := objKey
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+		printlnf("Upload local directory to: %s", objKey)
+
+		localPrefix, _ := path.Abs(localPath)
+		if !strings.HasSuffix(localPrefix, "/") {
+			localPrefix += "/"
+		}
+
+		var totalLen uint64
+		if err := fs.Walk(localPath, func(dir string, f fs.FileInfo, isRoot bool) errors.Error {
+			localPath, _ := path.Abs(path.Join(dir, f.Name()))
+			key := prefix + localPath[len(localPrefix):]
+
+			printlnf("  upload %s to %s", localPath[len(localPrefix):], key)
+
+			len, err := uploadObject(localPath, key)
+			if err != nil {
+				return errors.Wrap(err)
+			}
+			totalLen += uint64(len)
+			return nil
+		}, nil, nil, nil); err != nil {
+			return err
+		}
+
+		printlnf("Completed: %s", humanize.IBytes(totalLen))
+		return nil
+	}
+
 	return nil
+}
+
+func uploadObject(filePath, objKey string) (int64, error) {
+	//TODO upload with status bar
+	return minioClient.FPutObject(currentBucket, objKey, filePath, minio.PutObjectOptions{})
 }
 
 func mv(args []string) error {
@@ -561,7 +697,7 @@ func isDir(key string) (bool, error) {
 	return isDir, nil
 }
 
-func stat(key string) (bool, bool, int64, error) {
+func stat(key string) (isFile bool, isDir bool, fileSize int64, err error) {
 	doneCh := make(chan struct{})
 	defer close(doneCh)
 

@@ -11,6 +11,7 @@ require (
 	github.com/manifoldco/promptui v0.3.2
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/sbreitf1/errors v1.1.0
 	github.com/sbreitf1/fs v0.2.2
 	github.com/sbreitf1/go-console v0.0.0-20191104081911-05ee22e3cfe3
 	github.com/smartystreets/goconvey v1.6.4 // indirect
