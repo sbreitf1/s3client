@@ -359,6 +359,8 @@ func mv(args []string) error {
 		return err
 	}
 
+	//TODO check destination
+
 	if isFile {
 		src := minio.NewSourceInfo(currentBucket, currentPrefix+args[0], nil)
 		dst, err := minio.NewDestinationInfo(currentBucket, currentPrefix+args[1], nil, nil)
@@ -381,7 +383,63 @@ func mv(args []string) error {
 		return nil
 
 	} else if isDir {
-		return fmt.Errorf("Moving directories is not supported yet")
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		prefixSrc := currentPrefix + args[0]
+		if !strings.HasSuffix(prefixSrc, "/") {
+			prefixSrc += "/"
+		}
+
+		prefixDst := currentPrefix + args[1]
+		if !strings.HasSuffix(prefixDst, "/") {
+			prefixDst += "/"
+		}
+
+		// find all objects
+		list := make([]minio.ObjectInfo, 0)
+		objectCh := minioClient.ListObjectsV2(currentBucket, prefixSrc, true, doneCh)
+		for obj := range objectCh {
+			if obj.Err != nil {
+				return fmt.Errorf("failed to access object: %v", obj.Err)
+			}
+
+			list = append(list, obj)
+		}
+
+		if len(list) == 0 {
+			printlnf("Directory is empty")
+		} else {
+			var totalLen uint64
+
+			for _, obj := range list {
+				printlnf("Move file %q", obj.Key[len(prefixSrc):])
+
+				dstKey := prefixDst + obj.Key[len(prefixSrc):]
+				src := minio.NewSourceInfo(currentBucket, obj.Key, nil)
+				dst, err := minio.NewDestinationInfo(currentBucket, dstKey, nil, nil)
+				if err != nil {
+					return err
+				}
+
+				if err := minioClient.CopyObject(dst, src); err != nil {
+					return fmt.Errorf("failed to copy file %q: %s", obj.Key[len(prefixSrc):], err.Error())
+				}
+
+				if err := minioClient.RemoveObject(currentBucket, obj.Key); err != nil {
+					return fmt.Errorf("failed to delete previous file %q: %s", obj.Key[len(prefixSrc):], err.Error())
+				}
+
+				totalLen += uint64(obj.Size)
+			}
+
+			if len(list) == 1 {
+				printlnf("Completed: %s (%d file)", humanize.IBytes(totalLen), len(list))
+			} else {
+				printlnf("Completed: %s (%d files)", humanize.IBytes(totalLen), len(list))
+			}
+		}
+		return nil
 
 	} else {
 		return fmt.Errorf("Object %q does not exist", args[0])
@@ -398,14 +456,14 @@ func cp(args []string) error {
 		return err
 	}
 
+	//TODO check destination
+
 	if isFile {
 		src := minio.NewSourceInfo(currentBucket, currentPrefix+args[0], nil)
 		dst, err := minio.NewDestinationInfo(currentBucket, currentPrefix+args[1], nil, nil)
 		if err != nil {
 			return err
 		}
-
-		//TODO how to copy to parent dir?
 
 		// S3 does not support renaming -> copy and delte old one instead
 		if err := minioClient.CopyObject(dst, src); err != nil {
@@ -416,7 +474,59 @@ func cp(args []string) error {
 		return nil
 
 	} else if isDir {
-		return fmt.Errorf("Copying directories is not supported yet")
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		prefixSrc := currentPrefix + args[0]
+		if !strings.HasSuffix(prefixSrc, "/") {
+			prefixSrc += "/"
+		}
+
+		prefixDst := currentPrefix + args[1]
+		if !strings.HasSuffix(prefixDst, "/") {
+			prefixDst += "/"
+		}
+
+		// find all objects
+		list := make([]minio.ObjectInfo, 0)
+		objectCh := minioClient.ListObjectsV2(currentBucket, prefixSrc, true, doneCh)
+		for obj := range objectCh {
+			if obj.Err != nil {
+				return fmt.Errorf("failed to access object: %v", obj.Err)
+			}
+
+			list = append(list, obj)
+		}
+
+		if len(list) == 0 {
+			printlnf("Directory is empty")
+		} else {
+			var totalLen uint64
+
+			for _, obj := range list {
+				printlnf("Copy file %q", obj.Key[len(prefixSrc):])
+
+				dstKey := prefixDst + obj.Key[len(prefixSrc):]
+				src := minio.NewSourceInfo(currentBucket, obj.Key, nil)
+				dst, err := minio.NewDestinationInfo(currentBucket, dstKey, nil, nil)
+				if err != nil {
+					return err
+				}
+
+				if err := minioClient.CopyObject(dst, src); err != nil {
+					return fmt.Errorf("failed to copy file %q: %s", obj.Key[len(prefixSrc):], err.Error())
+				}
+
+				totalLen += uint64(obj.Size)
+			}
+
+			if len(list) == 1 {
+				printlnf("Completed: %s (%d file)", humanize.IBytes(totalLen), len(list))
+			} else {
+				printlnf("Completed: %s (%d files)", humanize.IBytes(totalLen), len(list))
+			}
+		}
+		return nil
 
 	} else {
 		return fmt.Errorf("Object %q does not exist", args[0])
@@ -630,6 +740,21 @@ func rmbucket(args []string) error {
 	if strDELETE != "DELETE" {
 		printlnf("Abort. Bucket was NOT deleted")
 		return nil
+	}
+
+	// delete all objects before deleting the bucket
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+
+	objectCh := minioClient.ListObjectsV2(bucketName, "", true, doneCh)
+	for obj := range objectCh {
+		if obj.Err != nil {
+			return fmt.Errorf("failed to access object: %v", obj.Err)
+		}
+
+		if err := minioClient.RemoveObject(bucketName, obj.Key); err != nil {
+			return fmt.Errorf("failed to delete object %q: %s", obj.Key, err.Error())
+		}
 	}
 
 	if err := minioClient.RemoveBucket(bucketName); err != nil {
