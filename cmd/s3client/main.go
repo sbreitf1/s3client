@@ -30,40 +30,7 @@ var (
 )
 
 func main() {
-	// command to execute
-	args := make([]string, 0)
-
-	// temporary parser state
-	envKey := ""
-	envKeyMode := false
-
-	for i := 1; i < len(os.Args); i++ {
-		if envKeyMode {
-			// read environment key and return to normal command line parser state
-			envKey = os.Args[i]
-			envKeyMode = false
-
-		} else {
-			// only read environment key once -> further "-e" args might be part of actual command
-			if len(envKey) == 0 && os.Args[i] == "-e" {
-				// next parameter contains the environment key
-				envKeyMode = true
-			} else {
-				// append to command
-				args = append(args, os.Args[i])
-			}
-		}
-	}
-
-	if len(envKey) == 0 && len(args) > 0 {
-		// the user seems helpless
-		printlnf("Usage:")
-		printlnf("  - Create new environment with \"-e {name}\" and use with same arguments")
-		printlnf("  - Type \"help\" to see a list of available commands")
-		os.Exit(1)
-	}
-
-	target, err := prepareEnv(envKey)
+	target, args, err := readArgs()
 	if err != nil {
 		printlnf(err.Error())
 		os.Exit(1)
@@ -79,6 +46,11 @@ func main() {
 		if err := enter([]string{target.DefaultBucket}); err != nil {
 			currentBucket = ""
 			printlnf(err.Error())
+
+			if len(target.SourceFile) == 0 && len(args) > 0 {
+				// the target was specified by command line and a command is given -> fail now for automation
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -96,6 +68,95 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func readArgs() (S3Target, []string, error) {
+	// command to execute
+	args := make([]string, 0)
+
+	// temporary parser state
+	envKey := ""
+	argParseMode := ""
+
+	var targetName, targetURL, targetAccessKey, targetSecretKey, targetBucketName string
+
+	for i := 1; i < len(os.Args); i++ {
+		nextArgParseMode := ""
+
+		switch argParseMode {
+		case "-e":
+			// read environment key and return to normal command line parser state
+			envKey = os.Args[i]
+
+		case "--name":
+			targetName = os.Args[i]
+		case "--url":
+			targetURL = os.Args[i]
+		case "--access-key":
+			targetAccessKey = os.Args[i]
+		case "--secret-key":
+			targetSecretKey = os.Args[i]
+		case "--bucket-name":
+			targetBucketName = os.Args[i]
+
+		case "":
+			// only read environment key once -> further "-e" args might be part of actual command
+			if len(envKey) == 0 && os.Args[i] == "-e" {
+				// next parameter contains the environment key
+				nextArgParseMode = "-e"
+			} else if strings.HasPrefix(os.Args[i], "--") {
+				nextArgParseMode = os.Args[i]
+			} else {
+				// append to command
+				args = append(args, os.Args[i])
+			}
+
+		default:
+			panic(fmt.Sprintf("invalid arg parser state %q", argParseMode))
+		}
+
+		argParseMode = nextArgParseMode
+	}
+
+	if len(targetName) > 0 || len(targetURL) > 0 || len(targetAccessKey) > 0 || len(targetSecretKey) > 0 || len(targetBucketName) > 0 {
+		if len(targetURL) == 0 {
+			printlnf("Missing --url parameter")
+			os.Exit(1)
+		}
+		if len(targetAccessKey) == 0 {
+			printlnf("Missing --access-key parameter")
+			os.Exit(1)
+		}
+		if len(targetSecretKey) == 0 {
+			printlnf("Missing --secret-key parameter")
+			os.Exit(1)
+		}
+
+		endpoint := targetURL
+		secure := true
+		if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
+			endpoint = endpoint[7:]
+			secure = false
+		} else if strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+			endpoint = endpoint[8:]
+			secure = true
+		}
+		return S3Target{Key: targetName, Endpoint: endpoint, Secure: secure, AccessKey: targetAccessKey, SecretKey: targetSecretKey, DefaultBucket: targetBucketName}, args, nil
+	}
+
+	if len(envKey) == 0 && len(args) > 0 {
+		// the user seems helpless
+		printlnf("Usage:")
+		printlnf("  - Create new environment with \"-e {name}\" and use with same arguments")
+		printlnf("  - Type \"help\" to see a list of available commands")
+		os.Exit(1)
+	}
+
+	target, err := prepareEnv(envKey)
+	if err != nil {
+		return S3Target{}, nil, err
+	}
+	return target, args, nil
 }
 
 func connect(target S3Target) error {
