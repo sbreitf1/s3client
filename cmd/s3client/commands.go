@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
@@ -888,9 +889,11 @@ func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatt
 		dirPadding := ""
 		if hasFiles {
 			// humanized file size: "1000.00 GiB" -> 11
+			// padding to date -> 2
+			// date length -> 12 (like in bash)
 			// padding to file name -> 2
-			// => 13
-			dirPadding = strings.Repeat(" ", 13)
+			// => 25
+			dirPadding = strings.Repeat(" ", 27)
 		}
 
 		for _, obj := range list {
@@ -903,10 +906,18 @@ func printObjects(prefix string, filter func(minio.ObjectInfo) bool, nameFormatt
 					sizeStr = sizeStr + "  "
 				}
 				padding := strings.Repeat(" ", 11-len(sizeStr))
-				printlnf("  F  %s%s  %s", padding, sizeStr, nameFormatter(obj.Key[len(prefix):]))
+				printlnf("  F  %s%s  %s  %s", padding, sizeStr, formatDate(obj.LastModified.Local()), nameFormatter(obj.Key[len(prefix):]))
 			}
 		}
 	}
 
 	return nil
+}
+
+func formatDate(d time.Time) string {
+	n := time.Now()
+	if n.Year() == d.Year() {
+		return d.Format("Jan 02 15:04")
+	}
+	return d.Format("Jan 02  2006")
 }
