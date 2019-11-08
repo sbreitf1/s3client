@@ -4,7 +4,14 @@ The S3 Client can be used to connect to a preconfigured S3 Endpoint and browse i
 
 ## Installation
 
-TODO
+Download and install the S3 Client via Go command line:
+
+```
+go get github.com/sbreitf1/s3client
+go install github.com/sbreitf1/s3client
+```
+
+You can now run the S3 client using `s3client` from your command line.
 
 ## Getting started
 
