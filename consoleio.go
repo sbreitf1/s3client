@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/sbreitf1/go-console"
@@ -17,106 +15,142 @@ var (
 	colorEnd       = "\033[0m"
 )
 
-func init() {
-	reader = bufio.NewReader(os.Stdin)
+func prepareCLE() *console.CommandLineEnvironment {
+	cle := console.NewCommandLineEnvironment("")
+	cle.SetPrompt(func() string {
+		if len(currentBucket) > 0 {
+			if len(currentPrefix) > 0 {
+				return fmt.Sprintf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd, currentBucket, currentTarget.Key, currentPrefix)
+			}
+			return fmt.Sprintf(colorTarget+"{%s@%s}"+colorEnd, currentBucket, currentTarget.Key)
+		}
+		return fmt.Sprintf(colorTarget+"{%s}"+colorEnd, currentTarget.Key)
+	})
 
-	//TODO disable colors?
+	cle.RegisterCommand(console.NewExitCommand("exit"))
+	cle.RegisterCommand(console.NewParameterlessCommand("help", help))
+	cle.RegisterCommand(console.NewCustomCommand("enter", newArgsCompletion(newArgBucket()), enter))
+	cle.RegisterCommand(console.NewParameterlessCommand("leave", leave))
+	cle.RegisterCommand(console.NewCustomCommand("cd", newArgsCompletion(newArgRemoteFile(false)), cd))
+	cle.RegisterCommand(console.NewCustomCommand("ls", newArgsCompletion(newArgRemoteFile(false)), ls))
+	cle.RegisterCommand(console.NewCustomCommand("rm", newArgsCompletion(newArgRemoteFile(true)), rm))
+	cle.RegisterCommand(console.NewCustomCommand("dl", newArgsCompletion(newArgRemoteFile(true), newArgLocalFile(true)), dl))
+	cle.RegisterCommand(console.NewCustomCommand("ul", newArgsCompletion(newArgLocalFile(true), newArgRemoteFile(true)), dl))
+	cle.RegisterCommand(console.NewCustomCommand("mv", newArgsCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), mv))
+	cle.RegisterCommand(console.NewCustomCommand("cp", newArgsCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), cp))
+	cle.RegisterCommand(console.NewCustomCommand("touch", newArgsCompletion(newArgRemoteFile(true)), touch))
+	cle.RegisterCommand(console.NewCustomCommand("cat", newArgsCompletion(newArgRemoteFile(true)), cat))
+	cle.RegisterCommand(console.NewCustomCommand("find", newArgsCompletion(nil, newArgRemoteFile(false)), find))
+	cle.RegisterCommand(console.NewCustomCommand("list", newArgsCompletion(newArgOneOf("bucket", "env")), list))
+	cle.RegisterCommand(console.NewCustomCommand("mkbucket", nil, mkbucket))
+	cle.RegisterCommand(console.NewCustomCommand("rmbucket", newArgsCompletion(newArgBucket()), rmbucket))
+
+	return cle
 }
 
-var (
-	reader *bufio.Reader
-)
+func runCLE() error {
+	cle := prepareCLE()
+	return cle.Run()
+}
 
-func readCmd() ([]string, error) {
-	if len(currentBucket) > 0 {
-		if len(currentPrefix) > 0 {
-			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd+"> ", currentBucket, currentTarget.Key, currentPrefix)
-		} else {
-			fmt.Printf(colorTarget+"{%s@%s}"+colorEnd+"> ", currentBucket, currentTarget.Key)
+/* ################################################ */
+/* ###              arg completion              ### */
+/* ################################################ */
+
+type argsCompletion struct {
+	args []argCompletion
+}
+
+func newArgsCompletion(args ...argCompletion) console.CompletionCandidatesForEntry {
+	return (&argsCompletion{args}).GetCandidates
+}
+
+func (a *argsCompletion) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+	if entryIndex >= 1 && entryIndex <= len(a.args) {
+		if a.args[entryIndex-1] != nil {
+			return a.args[entryIndex-1].GetCandidates(currentCommand, entryIndex)
 		}
-	} else {
-		fmt.Printf(colorTarget+"{%s}"+colorEnd+"> ", currentTarget.Key)
 	}
+	return nil
+}
 
-	//TODO could be a bit more advanced for convenience
-	//TODO maybe re-usable readln with provider functions for auto-complete and history?
+type argCompletion interface {
+	GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate
+}
 
-	var sb strings.Builder
-	escape := false
-	doubleQuote := false
-	singleQuote := false
+type argOneOf struct {
+	candidates []console.CompletionCandidate
+}
 
-	cmd := make([]string, 0)
+func newArgOneOf(list ...string) *argOneOf {
+	return &argOneOf{stringsToCandidates(list, true)}
+}
 
-	for {
-		if sb.Len() > 0 {
-			// show empty prompt on new lines
-			fmt.Print("> ")
-		}
+func (a *argOneOf) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+	return a.candidates
+}
 
-		line, err := readln()
-		if err != nil {
-			return nil, err
-		}
+type argBucket struct{}
 
-		for _, r := range line {
-			if singleQuote {
-				if r == '\'' {
-					singleQuote = false
-				} else {
-					sb.WriteRune(r)
-				}
+func newArgBucket() *argBucket {
+	return &argBucket{}
+}
 
-			} else if doubleQuote {
-				if escape {
-					sb.WriteRune(r)
-					escape = false
+func (a *argBucket) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+	buckets, err := getBuckets()
+	if err == nil {
+		return stringsToCandidates(buckets, true)
+	}
+	return nil
+}
 
-				} else {
-					if r == '"' {
-						doubleQuote = false
-					} else if r == '\\' {
-						escape = true
-					} else {
-						sb.WriteRune(r)
-					}
-				}
-			} else if escape {
-				sb.WriteRune(r)
-				escape = false
+type argRemoteFile struct {
+	withFiles bool
+}
 
-			} else {
-				if r == '\\' {
-					escape = true
-				} else if r == '\'' {
-					singleQuote = true
-				} else if r == '"' {
-					doubleQuote = true
-				} else if r == ' ' {
-					if sb.Len() > 0 {
-						cmd = append(cmd, sb.String())
-						sb.Reset()
-					}
-				} else {
-					sb.WriteRune(r)
-				}
+func newArgRemoteFile(withFiles bool) *argRemoteFile {
+	return &argRemoteFile{withFiles}
+}
+
+func (a *argRemoteFile) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+	files, err := getRemoteFiles(currentPrefix + currentCommand[entryIndex])
+	if err == nil {
+		candidates := make([]console.CompletionCandidate, 0)
+		for i := range files {
+			isDir := strings.HasSuffix(files[i], "/")
+			if a.withFiles || isDir {
+				candidates = append(candidates, console.CompletionCandidate{ReplaceString: files[i][len(currentPrefix):], IsFinal: !isDir})
 			}
 		}
-
-		if !escape && !doubleQuote && !singleQuote {
-			break
-		}
-
-		// append line break (in quote or escaped)
-		sb.WriteRune('\n')
+		return candidates
 	}
-
-	if sb.Len() > 0 {
-		cmd = append(cmd, sb.String())
-	}
-
-	return cmd, nil
+	return nil
 }
+
+type argLocalFile struct {
+	withFiles bool
+}
+
+func newArgLocalFile(withFiles bool) *argLocalFile {
+	return &argLocalFile{withFiles}
+}
+
+func (a *argLocalFile) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+	candidates, _ := console.BrowseCandidates("", currentCommand[entryIndex], a.withFiles)
+	return candidates
+}
+
+func stringsToCandidates(list []string, isFinal bool) []console.CompletionCandidate {
+	candidates := make([]console.CompletionCandidate, len(list))
+	for i := range list {
+		candidates[i] = console.CompletionCandidate{ReplaceString: list[i], IsFinal: isFinal}
+	}
+	return candidates
+}
+
+/* ################################################ */
+/* ###              read wrappers               ### */
+/* ################################################ */
 
 func readln() (string, error) {
 	return console.ReadLine()
@@ -149,11 +183,11 @@ func readpwNonEmpty() (string, error) {
 }
 
 func println(a ...interface{}) {
-	fmt.Println(a...)
+	console.Println(a...)
 }
 
 func printlnf(format string, args ...interface{}) {
-	fmt.Println(fmt.Sprintf(format, args...))
+	console.Printlnf(format, args...)
 }
 
 type errUserAbort struct{}

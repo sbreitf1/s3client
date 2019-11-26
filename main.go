@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/minio/minio-go"
+	"github.com/sbreitf1/go-console"
 )
 
 // S3Target contains address and credentials of a S3 endpoint.
@@ -57,14 +58,14 @@ func main() {
 	if len(args) > 0 {
 		// command specified as input? execute and then exit
 		if err := execLine(args); err != nil {
-			printlnf(err.Error())
+			printlnf("ERR: %s", err.Error())
 			os.Exit(1)
 		}
 
 	} else {
 		// interactive mode
-		if err := browse(); err != nil {
-			printlnf(err.Error())
+		if err := runCLE(); err != nil {
+			printlnf("FATAL: %s", err.Error())
 			os.Exit(1)
 		}
 	}
@@ -171,59 +172,6 @@ func connect(target S3Target) error {
 	return nil
 }
 
-func browse() error {
-	for {
-		cmd, err := readCmd()
-		if err != nil {
-			return err
-		}
-
-		// ignore empty commands -> same behavior as bash
-		if len(cmd) > 0 {
-			command := strings.TrimSpace(cmd[0])
-			switch command {
-			case "q":
-				fallthrough
-			case "exit":
-				return nil
-
-			//TODO envmod and envdel command?
-
-			case "":
-				// do nothing here -> same behavior as bash
-
-			default:
-				if err = execCommand(command, cmd[1:]); err != nil {
-					printlnf("ERR: %s", err.Error())
-				}
-			}
-		}
-	}
-}
-
-func init() {
-	commands["help"] = help
-	commands["enter"] = enter
-	commands["leave"] = leave
-	commands["cd"] = cd
-	commands["ls"] = ls
-	commands["rm"] = rm
-	commands["dl"] = dl
-	commands["ul"] = ul
-	commands["mv"] = mv
-	commands["cp"] = cp
-	commands["touch"] = touch
-	commands["cat"] = cat
-	commands["find"] = find
-	commands["list"] = list
-	commands["mkbucket"] = mkbucket
-	commands["rmbucket"] = rmbucket
-}
-
-var (
-	commands = make(map[string]func(args []string) error)
-)
-
 func execLine(cmd []string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("No command specified")
@@ -235,10 +183,13 @@ func execLine(cmd []string) error {
 }
 
 func execCommand(cmd string, args []string) error {
-	f, ok := commands[cmd]
-	if ok {
-		return f(args)
+	cle := prepareCLE()
+	cle.SetExecUnknownCommandHandler(nil)
+	if err := cle.ExecCommand(cmd, args); err != nil {
+		if err == console.ErrUnknownCommand {
+			return fmt.Errorf("unknown command %q. Use \"help\" to show a list of available commands", cmd)
+		}
+		return err
 	}
-
-	return fmt.Errorf("unknown command %q. Use \"help\" to show a list of available commands", cmd)
+	return nil
 }

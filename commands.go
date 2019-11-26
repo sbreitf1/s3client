@@ -103,7 +103,10 @@ func cd(args []string) error {
 			return fmt.Errorf("Directory %q not found", args[0])
 		}
 
-		currentPrefix += args[0] + "/"
+		currentPrefix += args[0]
+		if !strings.HasSuffix(currentPrefix, "/") {
+			currentPrefix += "/"
+		}
 	}
 
 	return nil
@@ -776,7 +779,6 @@ func rmbucket(args []string) error {
 /* ################################################ */
 
 //TODO validate command args with kingpin?
-//TODO select specific arg types from list (e.g. bucket name, object name, list type)
 
 type argOptions struct {
 	ArgLabels     []string
@@ -920,4 +922,33 @@ func formatDate(d time.Time) string {
 		return d.Format("Jan 02 15:04")
 	}
 	return d.Format("Jan 02  2006")
+}
+
+func getBuckets() ([]string, error) {
+	buckets, err := minioClient.ListBuckets()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(buckets))
+	for i := range buckets {
+		names[i] = buckets[i].Name
+	}
+	return names, nil
+}
+
+func getRemoteFiles(prefix string) ([]string, error) {
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+
+	list := make([]string, 0)
+	objectCh := minioClient.ListObjectsV2(currentBucket, prefix, false, doneCh)
+	for obj := range objectCh {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("failed to access object: %v", obj.Err)
+		}
+
+		list = append(list, obj.Key)
+	}
+
+	return list, nil
 }
