@@ -31,6 +31,10 @@ var (
 )
 
 func main() {
+	if !console.SupportsColors() {
+		disableColors()
+	}
+
 	target, args, err := readArgs()
 	if err != nil {
 		printlnf(err.Error())
@@ -184,9 +188,9 @@ func execLine(cmd []string) error {
 
 func execCommand(cmd string, args []string) error {
 	cle := prepareCLE()
-	cle.SetExecUnknownCommandHandler(nil)
+	cle.UnknownCommandHandler = nil
 	if err := cle.ExecCommand(cmd, args); err != nil {
-		if err == console.ErrUnknownCommand {
+		if console.IsErrUnknownCommand(err) {
 			return fmt.Errorf("unknown command %q. Use \"help\" to show a list of available commands", cmd)
 		}
 		return err

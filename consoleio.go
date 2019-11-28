@@ -15,35 +15,43 @@ var (
 	colorEnd       = "\033[0m"
 )
 
+func disableColors() {
+	colorWarning = ""
+	colorHighlight = ""
+	colorTarget = ""
+	colorPrefix = ""
+	colorEnd = ""
+}
+
 func prepareCLE() *console.CommandLineEnvironment {
-	cle := console.NewCommandLineEnvironment("")
-	cle.SetPrompt(func() string {
+	cle := console.NewCommandLineEnvironment()
+	cle.Prompt = func() string {
 		if len(currentBucket) > 0 {
 			if len(currentPrefix) > 0 {
-				return fmt.Sprintf(colorTarget+"{%s@%s}"+colorEnd+colorPrefix+"%s"+colorEnd, currentBucket, currentTarget.Key, currentPrefix)
+				return fmt.Sprintf("%s{%s@%s}%s%s%s", colorTarget, currentBucket, currentTarget.Key, colorPrefix, currentPrefix, colorEnd)
 			}
-			return fmt.Sprintf(colorTarget+"{%s@%s}"+colorEnd, currentBucket, currentTarget.Key)
+			return fmt.Sprintf("%s{%s@%s}%s", colorTarget, currentBucket, currentTarget.Key, colorEnd)
 		}
-		return fmt.Sprintf(colorTarget+"{%s}"+colorEnd, currentTarget.Key)
-	})
+		return fmt.Sprintf("%s{%s}%s", colorTarget, currentTarget.Key, colorEnd)
+	}
 
 	cle.RegisterCommand(console.NewExitCommand("exit"))
 	cle.RegisterCommand(console.NewParameterlessCommand("help", help))
-	cle.RegisterCommand(console.NewCustomCommand("enter", newArgsCompletion(newArgBucket()), enter))
+	cle.RegisterCommand(console.NewCustomCommand("enter", console.NewFixedArgCompletion(newArgBucket()), enter))
 	cle.RegisterCommand(console.NewParameterlessCommand("leave", leave))
-	cle.RegisterCommand(console.NewCustomCommand("cd", newArgsCompletion(newArgRemoteFile(false)), cd))
-	cle.RegisterCommand(console.NewCustomCommand("ls", newArgsCompletion(newArgRemoteFile(false)), ls))
-	cle.RegisterCommand(console.NewCustomCommand("rm", newArgsCompletion(newArgRemoteFile(true)), rm))
-	cle.RegisterCommand(console.NewCustomCommand("dl", newArgsCompletion(newArgRemoteFile(true), newArgLocalFile(true)), dl))
-	cle.RegisterCommand(console.NewCustomCommand("ul", newArgsCompletion(newArgLocalFile(true), newArgRemoteFile(true)), dl))
-	cle.RegisterCommand(console.NewCustomCommand("mv", newArgsCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), mv))
-	cle.RegisterCommand(console.NewCustomCommand("cp", newArgsCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), cp))
-	cle.RegisterCommand(console.NewCustomCommand("touch", newArgsCompletion(newArgRemoteFile(true)), touch))
-	cle.RegisterCommand(console.NewCustomCommand("cat", newArgsCompletion(newArgRemoteFile(true)), cat))
-	cle.RegisterCommand(console.NewCustomCommand("find", newArgsCompletion(nil, newArgRemoteFile(false)), find))
-	cle.RegisterCommand(console.NewCustomCommand("list", newArgsCompletion(newArgOneOf("bucket", "env")), list))
+	cle.RegisterCommand(console.NewCustomCommand("cd", console.NewFixedArgCompletion(newArgRemoteFile(false)), cd))
+	cle.RegisterCommand(console.NewCustomCommand("ls", console.NewFixedArgCompletion(newArgRemoteFile(false)), ls))
+	cle.RegisterCommand(console.NewCustomCommand("rm", console.NewFixedArgCompletion(newArgRemoteFile(true)), rm))
+	cle.RegisterCommand(console.NewCustomCommand("dl", console.NewFixedArgCompletion(newArgRemoteFile(true), console.NewLocalFileSystemArgCompletion(true)), dl))
+	cle.RegisterCommand(console.NewCustomCommand("ul", console.NewFixedArgCompletion(console.NewLocalFileSystemArgCompletion(true), newArgRemoteFile(true)), dl))
+	cle.RegisterCommand(console.NewCustomCommand("mv", console.NewFixedArgCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), mv))
+	cle.RegisterCommand(console.NewCustomCommand("cp", console.NewFixedArgCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), cp))
+	cle.RegisterCommand(console.NewCustomCommand("touch", console.NewFixedArgCompletion(newArgRemoteFile(true)), touch))
+	cle.RegisterCommand(console.NewCustomCommand("cat", console.NewFixedArgCompletion(newArgRemoteFile(true)), cat))
+	cle.RegisterCommand(console.NewCustomCommand("find", console.NewFixedArgCompletion(nil, newArgRemoteFile(false)), find))
+	cle.RegisterCommand(console.NewCustomCommand("list", console.NewFixedArgCompletion(console.NewOneOfArgCompletion("bucket", "env")), list))
 	cle.RegisterCommand(console.NewCustomCommand("mkbucket", nil, mkbucket))
-	cle.RegisterCommand(console.NewCustomCommand("rmbucket", newArgsCompletion(newArgBucket()), rmbucket))
+	cle.RegisterCommand(console.NewCustomCommand("rmbucket", console.NewFixedArgCompletion(newArgBucket()), rmbucket))
 
 	return cle
 }
@@ -57,49 +65,16 @@ func runCLE() error {
 /* ###              arg completion              ### */
 /* ################################################ */
 
-type argsCompletion struct {
-	args []argCompletion
-}
-
-func newArgsCompletion(args ...argCompletion) console.CompletionCandidatesForEntry {
-	return (&argsCompletion{args}).GetCandidates
-}
-
-func (a *argsCompletion) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
-	if entryIndex >= 1 && entryIndex <= len(a.args) {
-		if a.args[entryIndex-1] != nil {
-			return a.args[entryIndex-1].GetCandidates(currentCommand, entryIndex)
-		}
-	}
-	return nil
-}
-
-type argCompletion interface {
-	GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate
-}
-
-type argOneOf struct {
-	candidates []console.CompletionCandidate
-}
-
-func newArgOneOf(list ...string) *argOneOf {
-	return &argOneOf{stringsToCandidates(list, true)}
-}
-
-func (a *argOneOf) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
-	return a.candidates
-}
-
 type argBucket struct{}
 
 func newArgBucket() *argBucket {
 	return &argBucket{}
 }
 
-func (a *argBucket) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+func (a *argBucket) GetCompletionCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
 	buckets, err := getBuckets()
 	if err == nil {
-		return stringsToCandidates(buckets, true)
+		return console.PrepareCandidates(buckets, true)
 	}
 	return nil
 }
@@ -112,40 +87,24 @@ func newArgRemoteFile(withFiles bool) *argRemoteFile {
 	return &argRemoteFile{withFiles}
 }
 
-func (a *argRemoteFile) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+func (a *argRemoteFile) GetCompletionCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
 	files, err := getRemoteFiles(currentPrefix + currentCommand[entryIndex])
 	if err == nil {
 		candidates := make([]console.CompletionCandidate, 0)
 		for i := range files {
 			isDir := strings.HasSuffix(files[i], "/")
 			if a.withFiles || isDir {
-				candidates = append(candidates, console.CompletionCandidate{ReplaceString: files[i][len(currentPrefix):], IsFinal: !isDir})
+				parts := strings.Split(files[i], "/")
+				label := parts[len(parts)-1]
+				if isDir {
+					label += parts[len(parts)-2] + "/"
+				}
+				candidates = append(candidates, console.CompletionCandidate{Label: label, ReplaceString: files[i][len(currentPrefix):], IsFinal: !isDir})
 			}
 		}
 		return candidates
 	}
 	return nil
-}
-
-type argLocalFile struct {
-	withFiles bool
-}
-
-func newArgLocalFile(withFiles bool) *argLocalFile {
-	return &argLocalFile{withFiles}
-}
-
-func (a *argLocalFile) GetCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
-	candidates, _ := console.BrowseCandidates("", currentCommand[entryIndex], a.withFiles)
-	return candidates
-}
-
-func stringsToCandidates(list []string, isFinal bool) []console.CompletionCandidate {
-	candidates := make([]console.CompletionCandidate, len(list))
-	for i := range list {
-		candidates[i] = console.CompletionCandidate{ReplaceString: list[i], IsFinal: isFinal}
-	}
-	return candidates
 }
 
 /* ################################################ */

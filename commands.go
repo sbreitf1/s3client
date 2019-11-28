@@ -714,9 +714,9 @@ func rmbucket(args []string) error {
 		return fmt.Errorf("bucket %q does not exist", bucketName)
 	}
 
-	printlnf(colorWarning + "########################################")
+	printlnf("%s########################################", colorWarning)
 	printlnf("###  WARNING: POSSIBLE LOSS OF DATA  ###")
-	printlnf("########################################" + colorEnd)
+	printlnf("########################################%s", colorEnd)
 	printlnf("You are about to delete bucket %q.", bucketName)
 	printlnf("All data stored in this bucket will be lost and cannot be restored!")
 	printlnf("Please confirm deletion by entering the bucket name below:")
@@ -731,9 +731,9 @@ func rmbucket(args []string) error {
 		return nil
 	}
 
-	printlnf(colorWarning + "#########################################")
+	printlnf("%s#########################################", colorWarning)
 	printlnf("###  WARNING: THIS CAN NOT BE UNDONE  ###")
-	printlnf("#########################################" + colorEnd)
+	printlnf("#########################################%s", colorEnd)
 	printlnf("Are you sure? Please enter DELETE to finally delete the bucket:")
 	fmt.Print("> ")
 	strDELETE, err := readln()

@@ -45,6 +45,10 @@ github.com/sbreitf1/go-console v0.8.3 h1:frYZvsvabOAmHM9SXGJtjmr+EUJdeHWzQ6gpSTR
 github.com/sbreitf1/go-console v0.8.3/go.mod h1:u+cl8L9h/sm0xO6Y6kkpNu8eWTkmxlwzgNsavPqJvbI=
 github.com/sbreitf1/go-console v0.8.4 h1:6a5mnIJpeK+++jbg3k4LoQBuYt/kKC5+jeCdkJBysWQ=
 github.com/sbreitf1/go-console v0.8.4/go.mod h1:u+cl8L9h/sm0xO6Y6kkpNu8eWTkmxlwzgNsavPqJvbI=
+github.com/sbreitf1/go-console v0.9.1 h1:VHRyv1znepn5hccp7IpalOjgW2Aoztr2p/VLnyTCTjs=
+github.com/sbreitf1/go-console v0.9.1/go.mod h1:tbM94m8PzJRVhKvG19u5NVjR6ib8vpapevGkhcggA0U=
+github.com/sbreitf1/go-console v0.9.2 h1:YXDbVNRANzkfWPhXfpzfP+JsB8Dv4YfdeMEiFm7pP9E=
+github.com/sbreitf1/go-console v0.9.2/go.mod h1:tbM94m8PzJRVhKvG19u5NVjR6ib8vpapevGkhcggA0U=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.1.1/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
@@ -56,6 +60,8 @@ github.com/tsenart/deadcode v0.0.0-20160724212837-210d2dc333e9/go.mod h1:q+QjxYv
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4 h1:HuIa8hRrWRSrqYzx1qI49NNxhdi2PrY7gxVSq1JjLDc=
 golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4/go.mod h1:yigFU9vqHzYiE8UmvKecakEJjdnWj3jj499lnFckfCI=
+golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c h1:/nJuwDLoL/zrqY6gf57vxC+Pi+pZ8bfhpPkicO5H7W4=
+golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=
 golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
 golang.org/x/net v0.0.0-20190620200207-3b0461eec859/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
