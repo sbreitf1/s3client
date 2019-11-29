@@ -71,10 +71,10 @@ func newArgBucket() *argBucket {
 	return &argBucket{}
 }
 
-func (a *argBucket) GetCompletionCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+func (a *argBucket) GetCompletionOptions(currentCommand []string, entryIndex int) []console.CompletionOption {
 	buckets, err := getBuckets()
 	if err == nil {
-		return console.PrepareCandidates(buckets, true)
+		return console.PrepareCompletionOptions(buckets, true)
 	}
 	return nil
 }
@@ -87,10 +87,10 @@ func newArgRemoteFile(withFiles bool) *argRemoteFile {
 	return &argRemoteFile{withFiles}
 }
 
-func (a *argRemoteFile) GetCompletionCandidates(currentCommand []string, entryIndex int) []console.CompletionCandidate {
+func (a *argRemoteFile) GetCompletionOptions(currentCommand []string, entryIndex int) []console.CompletionOption {
 	files, err := getRemoteFiles(currentPrefix + currentCommand[entryIndex])
 	if err == nil {
-		candidates := make([]console.CompletionCandidate, 0)
+		candidates := make([]console.CompletionOption, 0)
 		for i := range files {
 			isDir := strings.HasSuffix(files[i], "/")
 			if a.withFiles || isDir {
@@ -99,7 +99,7 @@ func (a *argRemoteFile) GetCompletionCandidates(currentCommand []string, entryIn
 				if isDir {
 					label += parts[len(parts)-2] + "/"
 				}
-				candidates = append(candidates, console.CompletionCandidate{Label: label, ReplaceString: files[i][len(currentPrefix):], IsFinal: !isDir})
+				candidates = append(candidates, console.NewLabelledCompletionOption(label, files[i][len(currentPrefix):], isDir))
 			}
 		}
 		return candidates

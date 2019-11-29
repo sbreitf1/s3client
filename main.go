@@ -188,7 +188,7 @@ func execLine(cmd []string) error {
 
 func execCommand(cmd string, args []string) error {
 	cle := prepareCLE()
-	cle.UnknownCommandHandler = nil
+	cle.ExecUnknownCommand = nil
 	if err := cle.ExecCommand(cmd, args); err != nil {
 		if console.IsErrUnknownCommand(err) {
 			return fmt.Errorf("unknown command %q. Use \"help\" to show a list of available commands", cmd)
