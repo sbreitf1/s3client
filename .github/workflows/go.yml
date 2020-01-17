@@ -22,3 +22,6 @@ jobs:
 
     - name: Build
       run: go build -v .
+      
+    - name: GitHub Releases
+      uses: fnkr/github-action-ghr@v1.2
