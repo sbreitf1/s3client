@@ -10,5 +10,5 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/sbreitf1/errors v1.1.0
 	github.com/sbreitf1/fs v0.2.2
-	github.com/sbreitf1/go-console v0.9.3
+	github.com/sbreitf1/go-console v0.9.5
 )

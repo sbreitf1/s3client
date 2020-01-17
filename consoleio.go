@@ -43,7 +43,7 @@ func prepareCLE() *console.CommandLineEnvironment {
 	cle.RegisterCommand(console.NewCustomCommand("ls", console.NewFixedArgCompletion(newArgRemoteFile(false)), ls))
 	cle.RegisterCommand(console.NewCustomCommand("rm", console.NewFixedArgCompletion(newArgRemoteFile(true)), rm))
 	cle.RegisterCommand(console.NewCustomCommand("dl", console.NewFixedArgCompletion(newArgRemoteFile(true), console.NewLocalFileSystemArgCompletion(true)), dl))
-	cle.RegisterCommand(console.NewCustomCommand("ul", console.NewFixedArgCompletion(console.NewLocalFileSystemArgCompletion(true), newArgRemoteFile(true)), dl))
+	cle.RegisterCommand(console.NewCustomCommand("ul", console.NewFixedArgCompletion(console.NewLocalFileSystemArgCompletion(true), newArgRemoteFile(true)), ul))
 	cle.RegisterCommand(console.NewCustomCommand("mv", console.NewFixedArgCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), mv))
 	cle.RegisterCommand(console.NewCustomCommand("cp", console.NewFixedArgCompletion(newArgRemoteFile(true), newArgRemoteFile(true)), cp))
 	cle.RegisterCommand(console.NewCustomCommand("touch", console.NewFixedArgCompletion(newArgRemoteFile(true)), touch))
